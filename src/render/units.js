@@ -68,6 +68,10 @@ export function unitLayer(getView) {
           const p = board.toScreen(n.x + ox, n.y + oy);
           board.ring(p.x, p.y, 8 * S, '#ffffff', 1.5);
         }
+        if (ship.disabled !== undefined) {
+          const p = board.toScreen(n.x + ox - 5, n.y + oy - 6);
+          board.drawBadge('ION', p.x, p.y, { size: 8, bg: '#2a1650', border: '#c58cff', fg: '#e8d6ff' });
+        }
         if (cssTile >= 56) {
           const max = shipDef(ship).hull;
           const frac = ship.hull / max;

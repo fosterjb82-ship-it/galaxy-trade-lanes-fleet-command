@@ -43,7 +43,7 @@ test('buying from the shipyard puts the card in the discard pile', () => {
   assert.equal(g.players[0].spent, 2);
   assert.equal(g.cards[g.players[0].discard.at(-1)].def, 'ship-fighter');
   assert.throws(() => act(g, { type: 'buy', player: 0, def: 'ship-destroyer' }), /costs 6/);
-  assert.throws(() => act(g, { type: 'buy', player: 0, def: 'ship-carrier' }), /Shipyard/);
+  assert.throws(() => act(g, { type: 'buy', player: 0, def: 'ship-carrier' }), /not for sale/);
   cardLocations(g);
 });
 
@@ -68,8 +68,8 @@ test('end of turn: keep up to 2, discard the rest and played cards, draw back to
   const keep = g.players[0].hand.slice(0, 2);
   g = act(g, { type: 'endTurn', player: 0, keep });
   const p = g.players[0];
-  assert.equal(p.hand.length, HAND_SIZE);
-  assert.deepEqual(p.hand.slice(0, 2), keep, 'kept cards stay in hand');
+  assert.deepEqual(p.reserve, keep, 'kept cards are held in reserve (hidden, count public)');
+  assert.equal(p.hand.length + p.reserve.length, HAND_SIZE);
   assert.equal(p.played.length, 0);
   assert.equal(p.discard.length, 4, '1 played + 3 discarded from hand');
   cardLocations(g);
@@ -191,5 +191,7 @@ test('a full scripted round keeps every card accounted for', () => {
     }
   }
   assert.equal(g.round, 4);
-  for (const p of g.players) assert.equal(p.hand.length, HAND_SIZE);
+  for (const p of g.players) assert.equal(p.hand.length + p.reserve.length, HAND_SIZE);
+  const active = g.players[g.active];
+  assert.equal(active.reserve.length, 0, 'reserve returns to hand at start of turn');
 });

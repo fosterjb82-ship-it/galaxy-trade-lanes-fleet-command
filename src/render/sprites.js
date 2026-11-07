@@ -340,6 +340,49 @@ const CARD_ROWS = {
   ],
 };
 
+CARD_ROWS.shield = [
+  '..kkkkkkkk..',
+  '.kwcccccccbk',
+  '.kwcccccccbk',
+  '.kccccccccbk',
+  '.kccccccccbk',
+  '.kccccccccbk',
+  '..kccccccbk.',
+  '..kccccccbk.',
+  '...kccccbk..',
+  '....kccbk...',
+  '.....kkk....',
+  '............',
+];
+CARD_ROWS.repair = [
+  '............',
+  '....kkkk....',
+  '....keEk....',
+  '....keEk....',
+  '.kkkkeEkkkk.',
+  '.keeeeeeeEk.',
+  '.kEEEEEEEEk.',
+  '.kkkkeEkkkk.',
+  '....keEk....',
+  '....keEk....',
+  '....kkkk....',
+  '............',
+];
+CARD_ROWS.react = [
+  '.......kk...',
+  '......kyk...',
+  '.....kyyk...',
+  '....kyyk....',
+  '...kyyykkk..',
+  '..kyyyyyyk..',
+  '..kkkyyyk...',
+  '....kyyk....',
+  '...kyyk.....',
+  '...kyk......',
+  '...kk.......',
+  '............',
+];
+
 const STAR_ROWS = ['..w..', '.wyw.', 'wyyyw', '.wyw.', '..w..'];
 
 // ---------------------------------------------------------------- hex tiles
@@ -497,7 +540,7 @@ export function sprite(key) {
       c = nebula(16);
       break;
     case 'card':
-      c = fromRows(CARD_ROWS[variant], { ...BASE_PALETTE, r: '#ff5d5d' });
+      c = fromRows(CARD_ROWS[variant], { ...BASE_PALETTE, r: '#ff5d5d', b: '#1a4f8c', e: '#3ddc84', E: '#176b3a' });
       break;
     case 'tile': {
       // tile:<kind>:<variant>[:<tint>]

@@ -553,3 +553,14 @@ table.score td b { font-size: 18px; }
 details.dev { margin-top: 18px; }
 details.dev summary { cursor: pointer; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
 details.dev .sandbox { margin-top: 8px; }
+
+/* ================================================================ stage 4 */
+
+.combat-log { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; }
+.choice-list { display: grid; gap: 8px; margin-top: 10px; }
+.choice-list button { text-align: left; padding: 10px 12px; }
+details.armory summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.card.type-reaction { border-color: #8a5cc9; }
+.card.type-utility { border-color: #2e8b57; }
+.handoff p { max-width: 520px; margin: 4px 0; }
+.mode-bar { max-width: calc(100% - 140px); flex-wrap: wrap; white-space: normal; border-radius: 16px; }

@@ -18,7 +18,7 @@ There is no build step: plain ES modules, no dependencies.
 | 1 | Map generator with seeds and fairness checks | ✅ Map Lab |
 | 2 | Core game state: decks, hands, ships on the board, Command Points | ✅ |
 | 3 | Turn flow: draw, play, buy, end turn, end-of-round scoring | ✅ Hot-seat turns |
-| 4 | Combat, reactions and repair | — |
+| 4 | Combat, reactions and repair | ✅ |
 | 5 | Market, trade routes, missions, pirates and the uncertain ending | — |
 
 ### Stage 1: Map Lab
@@ -84,7 +84,6 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
     - asteroid fields cost 2 and void is impassable;
     - ships must stop when they enter a tile with enemy ships or pirates (they can't fly through), so choke points can be held;
     - each nebula entered deals 1 damage, which can destroy the ship; its card returns to the discard pile.
-  - **Attack** cards unlock in Stage 4.
 - **Hidden tiles** are revealed when a ship ends its move there:
   - a derelict gives +2 credits;
   - a bonus cache draws 1 card;
@@ -95,6 +94,27 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - choose up to 2 cards to keep;
   - the rest of your hand and your played cards are discarded, and you draw back up to 5.
 - **End of round:** each controlled key planet scores 2 VP, a round summary is shown, and the first player rotates. The pirate phase, trade agreements and the uncertain ending arrive in Stage 5.
+
+### Stage 4: Combat, reactions and repair
+
+- **Attack cards:** pick one of your armed ships, then a target. Every option shows the exact damage and the hull it leaves, e.g. "Bo frigate 4/4: 4 dmg (destroyed)". There are no dice.
+- **Damage** = weapon + Attack card bonus − shields − armor (− 2 for Evasive Maneuvers):
+  - **Lasers** suffer shields in full.
+  - **Cannons** ignore up to 2 points of shields.
+  - **Missiles** reach adjacent tiles but are stopped by point defense.
+  - **Ion** weapons deal no damage; they disable the target so it can't move or attack on its owner's next turn.
+- **Firing limits:** each ship fires at most once per turn, and unarmed ships (freighter, carrier) can't attack.
+- **Kills:** destroying a ship (pirates included) scores 1 VP immediately. The wreck's card and upgrades go back to its owner's discard pile.
+- **Reactions:**
+  - Cards kept at the end of your turn become a face-down reserve. Opponents only see the count ("Held").
+  - When you're attacked and hold cards, the game hands the device to you with a private prompt: play one reaction or take the hit. Only one reaction is allowed per attack.
+  - The reactions are Return Fire, Evasive Maneuvers (fighters and frigates), Point Defense, Emergency Shields (+3) and Retreat (choose a neighbouring tile).
+  - **Ambush** triggers when an enemy moves onto your tile: one of your ships there hits it first.
+  - The combat report is then shown to everyone and the device goes back to the attacker.
+- **Repairs:**
+  - Repair (+2 hull) and Field Repairs (+4) cards work on any of your ships.
+  - At the start of your turn, ships at a station you control repair fully, and ships sharing a tile with your carrier repair 2.
+- **Armory:** a temporary shop for reaction and repair cards until the Market Row arrives in Stage 5.
 
 ## Layout
 
@@ -110,6 +130,7 @@ src/game/ships.js       ship stats, CP costs, pirate fleets
 src/game/cards.js       card definitions and the starting deck
 src/game/state.js       game state, control, CP, turn flow, actions
 src/game/movement.js    movement range and paths on the hex board
+src/game/combat.js      ship stats, damage maths, range, attack options
 src/render/units.js     ships, control outlines and deploy targets on the board
 src/ui/                 screens: setup, game, Map Lab; cards; details pane
 tests/                  node --test suites
