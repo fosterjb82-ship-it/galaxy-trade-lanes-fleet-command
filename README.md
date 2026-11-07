@@ -16,7 +16,7 @@ There is no build step: plain ES modules, no dependencies.
 | Stage | Scope | Status |
 | --- | --- | --- |
 | 1 | Map generator with seeds and fairness checks | ✅ Map Lab |
-| 2 | Core game state: decks, hands, ships on the board, Command Points | — |
+| 2 | Core game state: decks, hands, ships on the board, Command Points | ✅ Playable sandbox |
 | 3 | Turn flow: draw, play, buy, end turn, end-of-round scoring | — |
 | 4 | Combat, reactions and repair | — |
 | 5 | Market, trade routes, missions, pirates and the uncertain ending | — |
@@ -51,6 +51,28 @@ There is no build step: plain ES modules, no dependencies.
   - any hidden contents or pirates on it;
   - its neighbouring tiles (click one to open it).
 
+### Stage 2: Core game state
+
+- **Setup screen:** pick 2–6 players, name them and choose a map seed. The game saves to this browser automatically; *Continue* resumes it.
+- **Decks and hands:**
+  - Everyone starts with the same 10 cards: Fighter, 4 × Credits, 3 × Move, 2 × Attack.
+  - Everyone draws 5 cards, and the Fighter is always in the opening hand.
+  - When a deck runs out, the discard pile is shuffled to form a new one.
+- **Ships on the board:**
+  - Playing a Ship card highlights every tile where you may deploy: tiles you control, plus your carrier's tile. Click one to deploy.
+  - The card leaves your hand and stays with the ship until the ship is destroyed.
+  - Ships are drawn on their tiles with hull badges, and each tile's details pane lists the ships on it.
+- **Control:**
+  - A player with the only ships on a tile controls it.
+  - When several players have ships there, the highest total hull wins; a tie means nobody controls it.
+  - An empty home stays with its owner.
+  - Pirates never control tiles, but they can stop others from controlling them.
+  - Controlled tiles are outlined in the controller's colour.
+- **Command Points:** capacity comes from your home (6), each key planet (2) and each station (2). The sidebar shows a meter and where your capacity comes from. Deploying over capacity is refused with the reason. Losing territory never removes ships, but it blocks new deploys until you are back under capacity.
+- **Sandbox (until Stage 3 adds turn flow):** switch the active player, give any card, and *Reposition* a ship to any open tile to see control and CP change.
+
+The engine (`src/game/`) is a pure, JSON-serialisable state that only changes through `applyAction()`, which validates every action.
+
 ## Layout
 
 ```
@@ -61,6 +83,10 @@ src/map/hex.js          axial hex maths, rotations, pixel <-> tile
 src/map/graph.js        BFS, Dijkstra, components, betweenness
 src/render/sprites.js   pixel-art hex tiles and sprites (procedural + hand-drawn)
 src/render/board.js     canvas hex board: integer zoom, pan, hit testing, crisp text
-src/ui/                 screens (Map Lab)
+src/game/ships.js       ship stats, CP costs, pirate fleets
+src/game/cards.js       card definitions and the starting deck
+src/game/state.js       game state, control, Command Points, actions
+src/render/units.js     ships, control outlines and deploy targets on the board
+src/ui/                 screens: setup, game, Map Lab; cards; details pane
 tests/                  node --test suites
 ```

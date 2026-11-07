@@ -89,7 +89,7 @@ export class Board {
     this.dpr = dpr;
     this.canvas.width = Math.max(1, Math.round(rect.width * dpr));
     this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
-    if (this.map && !this.fitted) this.fit();
+    if (this.map && !this.userView) this.fit();
     this.invalidate();
   }
 
@@ -109,7 +109,7 @@ export class Board {
     const b = this.map.bounds;
     this.scale = this.fitScale();
     this.center = { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
-    this.fitted = this.canvas.width > 1;
+    this.userView = false; // keep refitting on resize until the user zooms or pans
     this.emit('zoom', this.scale);
     this.invalidate();
   }
@@ -136,6 +136,7 @@ export class Board {
   zoomBy(step, anchor = null) {
     const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.scale + step));
     if (next === this.scale) return;
+    this.userView = true;
     const a = anchor ?? { x: this.canvas.width / 2, y: this.canvas.height / 2 };
     const before = this.toBoard(a.x, a.y);
     this.scale = next;
@@ -183,6 +184,7 @@ export class Board {
         const dy = p.y - drag.start.y;
         if (Math.hypot(dx, dy) > 5 * this.dpr) drag.moved = true;
         if (drag.moved) {
+          this.userView = true;
           this.center = { x: drag.center.x - dx / this.scale, y: drag.center.y - dy / this.scale };
           this.invalidate();
         }
@@ -277,6 +279,18 @@ export class Board {
     ctx.restore();
   }
 
+  /** Vector ring at native resolution (selection markers). */
+  ring(sx, sy, r, color, width = 2) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.lineWidth = this.px(width);
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // ------------------------------------------------------------ main draw
 
   draw() {
@@ -348,7 +362,7 @@ export class Board {
       if (n.hidden && !this.options.revealHidden) {
         this.drawText('?', c.x, c.y - this.px(1), { size: Math.min(16, Math.max(10, cssTile / 5)), weight: 800 });
       }
-      if (this.options.showLabels && n.name && cssTile >= 64) {
+      if (this.options.showLabels && n.name && cssTile >= 64 && (!this.options.labelFilter || this.options.labelFilter(n))) {
         const color = n.type === 'home' ? PLAYER_COLORS[n.homeOf].light : n.type === 'key' ? '#ffe7a8' : '#c3cbe6';
         this.drawText(n.name, c.x, c.y + (TILE_H / 2 - 5) * S, {
           size: Math.min(12, cssTile / 7), weight: n.type === 'home' || n.type === 'key' ? 650 : 500, color,

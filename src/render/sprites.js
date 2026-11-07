@@ -295,6 +295,51 @@ const TRADE_ROWS = [
   '..............',
 ];
 
+const CARD_ROWS = {
+  credit: [
+    '....kkkk....',
+    '..kkyyyykk..',
+    '.kyywwyyyyk.',
+    '.kywyyyyyYk.',
+    'kyyyyYYyyyYk',
+    'kyyyYyyYyyYk',
+    'kyyyYyyyyyYk',
+    'kyyyYyyYyyYk',
+    '.kyyyYYyyYk.',
+    '.kyyyyyyYYk.',
+    '..kkYYYYkk..',
+    '....kkkk....',
+  ],
+  move: [
+    '............',
+    '..kk..kk....',
+    '..kck.kck...',
+    '...kck.kck..',
+    '....kck.kck.',
+    '.....kcwkcwk',
+    '.....kcwkcwk',
+    '....kck.kck.',
+    '...kck.kck..',
+    '..kck.kck...',
+    '..kk..kk....',
+    '............',
+  ],
+  attack: [
+    '.....kk.....',
+    '.....rr.....',
+    '...kkrrkk...',
+    '..krr..rrk..',
+    '.kr......rk.',
+    'krr..ww..rrk',
+    'krr..ww..rrk',
+    '.kr......rk.',
+    '..krr..rrk..',
+    '...kkrrkk...',
+    '.....rr.....',
+    '.....kk.....',
+  ],
+};
+
 const STAR_ROWS = ['..w..', '.wyw.', 'wyyyw', '.wyw.', '..w..'];
 
 // ---------------------------------------------------------------- hex tiles
@@ -450,6 +495,9 @@ export function sprite(key) {
       break;
     case 'hidden':
       c = nebula(16);
+      break;
+    case 'card':
+      c = fromRows(CARD_ROWS[variant], { ...BASE_PALETTE, r: '#ff5d5d' });
       break;
     case 'tile': {
       // tile:<kind>:<variant>[:<tint>]

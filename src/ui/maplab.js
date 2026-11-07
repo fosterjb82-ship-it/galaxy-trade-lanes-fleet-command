@@ -2,69 +2,17 @@
 // every fairness check, inspect rejected candidates, zoom the board and click
 // any tile for a details pane.
 
-import { generateMap, generateCandidate, mapParams, allCosts, enterCost } from '../map/generator.js';
-import { neighbors, key } from '../map/hex.js';
+import { generateMap, generateCandidate, mapParams, allCosts } from '../map/generator.js';
 import { randomSeed } from '../rng.js';
 import { Board } from '../render/board.js';
-import { PLAYER_COLORS, tileSpriteKey, featureSpriteKey, sprite } from '../render/sprites.js';
+import { PLAYER_COLORS } from '../render/sprites.js';
 import { h, spriteIcon } from './dom.js';
-
-const TYPE_LABEL = {
-  home: 'Home sector',
-  key: 'Key planet',
-  intersection: 'Lane intersection',
-  station: 'Space station',
-  trade: 'Trade node',
-  empty: 'Open space',
-  asteroid: 'Asteroid field',
-  nebula: 'Nebula',
-  void: 'Void rift',
-};
-
-const TYPE_EFFECT = {
-  home: 'Your starting point. Deploy ships here.',
-  key: 'Worth 2 VP to its controller at the end of every round.',
-  intersection: 'A choke point many routes pass through. Controlling it can pay a toll of +1 credit per turn.',
-  station: 'Deploy ships here. Ships cost 1 less while you control a station. Ships starting a turn here fully repair.',
-  trade: 'Endpoint for trade routes between players.',
-  empty: 'Plain space. Nothing here.',
-  asteroid: 'Rocky and slow: entering costs 2 movement.',
-  nebula: 'Ionised gas: a ship entering takes 1 damage.',
-  void: 'Impassable. Ships cannot enter.',
-};
-
-const CP_VALUE = { home: 6, key: 2, station: 2 };
-const VP_VALUE = { key: '2 per round' };
-const HIDDEN_LABEL = { derelict: 'Derelict: salvage credits', pirateNest: 'Pirate nest: spawns a pirate fleet', bonus: 'Bonus cache: draw extra cards' };
+import { tileDetails } from './details.js';
 
 function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
   const players = Math.min(6, Math.max(2, Number(params.get('players')) || 4));
   return { seed: params.get('seed') || randomSeed(), players };
-}
-
-/** A DOM canvas showing a whole tile (background + feature) as pixel art. */
-function tilePreview(node, reveal, cssWidth = 84) {
-  const bg = sprite(tileSpriteKey(node));
-  const dpr = window.devicePixelRatio || 1;
-  const scale = Math.max(1, Math.floor((cssWidth * dpr) / bg.width));
-  const c = document.createElement('canvas');
-  c.className = 'sprite';
-  c.width = bg.width * scale;
-  c.height = bg.height * scale;
-  c.style.width = `${c.width / dpr}px`;
-  c.style.height = `${c.height / dpr}px`;
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(bg, 0, 0, c.width, c.height);
-  const fk = featureSpriteKey(node, { revealHidden: reveal });
-  if (fk) {
-    const f = sprite(fk);
-    const x = (Math.floor(bg.width / 2) - Math.floor(f.width / 2)) * scale;
-    const y = (Math.floor(bg.height / 2) - Math.floor(f.height / 2)) * scale;
-    ctx.drawImage(f, x, y, f.width * scale, f.height * scale);
-  }
-  return c;
 }
 
 export function mountMapLab(root) {
@@ -81,7 +29,7 @@ export function mountMapLab(root) {
     state.seed = seedInput.value.trim() || randomSeed();
     seedInput.value = state.seed;
     state.players = Number(playersSelect.value);
-    history.replaceState(null, '', `#seed=${encodeURIComponent(state.seed)}&players=${state.players}`);
+    history.replaceState(null, '', `#lab&seed=${encodeURIComponent(state.seed)}&players=${state.players}`);
     const t0 = performance.now();
     state.map = generateMap(state.seed, state.players);
     state.ms = performance.now() - t0;
@@ -93,7 +41,7 @@ export function mountMapLab(root) {
   playersSelect.addEventListener('change', generate);
 
   const topbar = h('header.topbar',
-    h('div.brand', h('h1', 'Fleet Command'), h('span.stage', 'Stage 1 · Map Lab')),
+    h('div.brand', h('h1', 'Fleet Command'), h('span.stage', 'Map Lab')),
     h('label', 'Seed', seedInput),
     h('label', playersSelect),
     h('button.primary', { onclick: generate }, 'Generate'),
@@ -106,6 +54,8 @@ export function mountMapLab(root) {
       },
     }, 'Copy share link'),
     toast,
+    h('span.spacer'),
+    h('a.button', { href: '#' }, 'Back to game setup'),
   );
 
   const canvas = h('canvas.board');
@@ -140,54 +90,11 @@ export function mountMapLab(root) {
 
   function openDetails(id) {
     const map = board.map;
-    const node = map.nodes[id];
     board.select(id);
-    const homes = map.nodes.filter((n) => n.type === 'home').sort((a, b) => a.homeOf - b.homeOf);
     const pirates = map.pirates.filter((p) => p.node === id);
-    const at = new Map(map.nodes.map((n) => [key(n.q, n.r), n]));
-    const adjacent = neighbors(node.q, node.r).map((c) => at.get(key(c.q, c.r))).filter(Boolean);
-
-    let typeText = TYPE_LABEL[node.type];
-    if (node.core) typeText = 'Key planet · Galactic core';
-    else if (node.central) typeText = 'Key planet · contested center';
-    if (node.type === 'home') typeText = `Home sector · Player ${node.homeOf + 1}`;
-    const title = node.name ?? TYPE_LABEL[node.type];
-    const cost = enterCost(node.type);
-
-    const row = (label, value) => h('div.row', h('span', label), h('b', value));
-    details.replaceChildren(...[
-      h('button.close', { 'aria-label': 'Close details', onclick: closeDetails }, '×'),
-      h('div.head',
-        tilePreview(node, state.reveal),
-        h('div',
-          h('div.title', title),
-          h('div.type', typeText),
-          h('div.coords', `Tile ${node.q}, ${node.r}`))),
-      h('p.effect', TYPE_EFFECT[node.type]),
-      node.core && h('p.effect', 'The Galactic Core mission scores 4 VP for controlling this planet at the end of the game.'),
-      node.hidden && h('div.callout',
-        h('b', 'Hidden tile'),
-        h('span', state.reveal ? HIDDEN_LABEL[node.hiddenContent] : 'Something is out here. It is revealed when a ship arrives.')),
-      pirates.length > 0 && h('div.callout.danger',
-        h('b', 'Neutral pirate fleet'),
-        h('span', `Hull ${pirates[0].hull} / ${pirates[0].maxHull} · Laser ${pirates[0].weapon}. Moves toward freighters at the end of each round.`)),
-      h('h3', 'Tile'),
-      row('Movement to enter', cost === Infinity ? 'Impassable' : String(cost)),
-      CP_VALUE[node.type] && row('Command Points', `+${CP_VALUE[node.type]} capacity`),
-      VP_VALUE[node.type] && row('Victory points', VP_VALUE[node.type]),
-      row('Controlled by', node.type === 'home' ? `Player ${node.homeOf + 1} (at start)` : 'No one'),
-      node.type !== 'void' && h('h3', 'Moves from each home'),
-      node.type !== 'void' && h('div.home-dist', homes.map((hm) => h('span.chip', {
-        style: { borderColor: PLAYER_COLORS[hm.homeOf].main, color: PLAYER_COLORS[hm.homeOf].light },
-      }, `P${hm.homeOf + 1}: ${costs[hm.id][id] === Infinity ? '—' : costs[hm.id][id]}`))),
-      h('h3', 'Neighbouring tiles'),
-      h('ul.neighbours', adjacent.map((n) => h('li', {
-        onclick: () => openDetails(n.id),
-        title: 'Show this tile',
-      }, spriteIcon(featureSpriteKey(n, { revealHidden: state.reveal }) ?? tileSpriteKey(n), 18),
-      h('span', n.name ?? TYPE_LABEL[n.type]),
-      h('span.muted', n.name ? TYPE_LABEL[n.type] : '')))),
-    ].filter(Boolean));
+    details.replaceChildren(...tileDetails({
+      map, id, costs, reveal: state.reveal, pirates, onNavigate: openDetails, onClose: closeDetails,
+    }));
     details.classList.add('open');
   }
 
@@ -295,6 +202,7 @@ export function mountMapLab(root) {
   }
 
   window.addEventListener('hashchange', () => {
+    if (!location.hash.startsWith('#lab')) return;
     const next = readHash();
     if (next.seed !== state.seed || next.players !== state.players) {
       seedInput.value = next.seed;
