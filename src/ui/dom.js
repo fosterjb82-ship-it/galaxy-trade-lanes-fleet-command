@@ -9,7 +9,7 @@ export function h(tag, attrs = {}, ...children) {
     if (part[0] === '.') el.classList.add(part.slice(1));
     else el.id = part.slice(1);
   }
-  if (attrs && (typeof attrs !== 'object' || attrs instanceof Node || Array.isArray(attrs))) {
+  if (attrs !== undefined && (attrs === null || typeof attrs !== 'object' || attrs instanceof Node || Array.isArray(attrs))) {
     children.unshift(attrs);
     attrs = {};
   }

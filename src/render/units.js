@@ -13,7 +13,7 @@ export function unitLayer(getView) {
   return (board) => {
     const view = getView();
     if (!view?.state) return;
-    const { state, targets, selectedShip } = view;
+    const { state, targets, selectedShip, labels, path } = view;
     const map = state.map;
     const S = board.scale;
     const cssTile = (TILE_W * S) / board.dpr;
@@ -29,7 +29,25 @@ export function unitLayer(getView) {
     // Deploy / placement targets.
     for (const tile of targets ?? []) {
       const n = map.nodes[tile];
-      board.blit(sprite('outline:6dffa8:2'), n.x - TILE_W / 2, n.y - TILE_H / 2);
+      board.blit(sprite('outline:6dffa8:1'), n.x - TILE_W / 2, n.y - TILE_H / 2);
+    }
+
+    // Planned route (vector, native resolution) under the ships.
+    if (path && path.length > 1) {
+      const ctx = board.ctx;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(109, 255, 168, 0.9)';
+      ctx.lineWidth = board.px(3);
+      ctx.setLineDash([board.px(6), board.px(5)]);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      path.forEach((t, i) => {
+        const p = board.toScreen(map.nodes[t].x, map.nodes[t].y);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+      ctx.restore();
     }
 
     // Ships, grouped by tile.
@@ -67,6 +85,12 @@ export function unitLayer(getView) {
         const p = board.toScreen(n.x + ox, n.y + oy);
         board.drawBadge(`+${ships.length - shown.length}`, p.x, p.y, { size: 10 });
       }
+    }
+    // Target labels (e.g. movement cost) on top.
+    for (const [tile, text] of labels ?? []) {
+      const n = map.nodes[tile];
+      const p = board.toScreen(n.x, n.y - 11);
+      board.drawBadge(text, p.x, p.y, { bg: '#10331f', border: '#6dffa8', fg: '#d9ffe8', size: cssTile >= 80 ? 11 : 9 });
     }
   };
 }

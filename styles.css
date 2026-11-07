@@ -462,3 +462,94 @@ table.players tr.active td { background: rgba(111, 227, 255, 0.07); font-weight:
 .ship-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .ship-row { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: start; font-size: 13px; }
 .small-btn { font-size: 12px; padding: 3px 8px; }
+
+/* ================================================================ stage 3 */
+
+.turn-order { display: flex; gap: 6px; flex-wrap: wrap; }
+.order-chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+.order-chip b { color: var(--text); font-weight: 700; }
+.order-chip.done { opacity: 0.4; }
+.order-chip.now { opacity: 1; background: rgba(255, 255, 255, 0.06); box-shadow: 0 0 0 1px currentColor inset; }
+
+.credits { display: flex; align-items: center; gap: 5px; margin: 4px 0 2px; color: var(--gold); font-size: 13px; }
+.credits b { font-size: 18px; }
+.end-turn {
+  flex-shrink: 0;
+  height: 84px;
+  min-width: 110px;
+  font-size: 15px;
+  font-weight: 700;
+  background: #5a3a12;
+  border-color: #c98a2a;
+  border-radius: 12px;
+}
+.end-turn:hover:not(:disabled) { background: #6e4816; border-color: var(--gold); }
+.hand-hidden { display: flex; align-items: center; gap: 14px; padding: 30px 8px; color: var(--muted); flex: 1; justify-content: center; }
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  place-items: center;
+  background: rgba(3, 4, 10, 0.78);
+  backdrop-filter: blur(6px);
+  z-index: 50;
+  padding: 16px;
+}
+.overlay.show { display: grid; }
+.dialog {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.dialog h2 { margin: 0 0 10px; font-size: 22px; }
+.dialog .callout { display: grid; gap: 2px; padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; }
+.dialog .callout.danger { background: rgba(210, 60, 60, 0.12); border: 1px solid rgba(210, 60, 60, 0.5); }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.keep-cards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.kicker { color: var(--accent); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px; }
+.handoff { display: grid; justify-items: center; text-align: center; gap: 6px; padding: 18px 0 6px; }
+.handoff h2 { font-size: 26px; }
+.handoff .big { margin-top: 10px; }
+table.score { width: 100%; border-collapse: collapse; }
+table.score th { text-align: left; color: var(--muted); font-size: 12px; font-weight: 600; padding: 6px; }
+table.score td { padding: 8px 6px; border-top: 1px solid var(--line); }
+table.score td b { font-size: 18px; }
+
+.pc-head .vp { margin-left: auto; text-align: center; line-height: 1.1; }
+.pc-head .vp b { font-size: 24px; display: block; color: var(--gold); }
+.pc-head .vp span { font-size: 11px; color: var(--muted); font-weight: 700; }
+
+.shipyard { display: grid; gap: 6px; }
+.yard-item {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border-radius: 8px;
+}
+.buy { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; font-weight: 700; }
+.buy .price { color: var(--gold); }
+.buy s { color: var(--muted); font-weight: 500; }
+.buy:not(:disabled):hover { background: #3a2c0a; }
+
+details.dev { margin-top: 18px; }
+details.dev summary { cursor: pointer; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+details.dev .sandbox { margin-top: 8px; }

@@ -16,8 +16,8 @@ There is no build step: plain ES modules, no dependencies.
 | Stage | Scope | Status |
 | --- | --- | --- |
 | 1 | Map generator with seeds and fairness checks | ✅ Map Lab |
-| 2 | Core game state: decks, hands, ships on the board, Command Points | ✅ Playable sandbox |
-| 3 | Turn flow: draw, play, buy, end turn, end-of-round scoring | — |
+| 2 | Core game state: decks, hands, ships on the board, Command Points | ✅ |
+| 3 | Turn flow: draw, play, buy, end turn, end-of-round scoring | ✅ Hot-seat turns |
 | 4 | Combat, reactions and repair | — |
 | 5 | Market, trade routes, missions, pirates and the uncertain ending | — |
 
@@ -69,9 +69,32 @@ There is no build step: plain ES modules, no dependencies.
   - Pirates never control tiles, but they can stop others from controlling them.
   - Controlled tiles are outlined in the controller's colour.
 - **Command Points:** capacity comes from your home (6), each key planet (2) and each station (2). The sidebar shows a meter and where your capacity comes from. Deploying over capacity is refused with the reason. Losing territory never removes ships, but it blocks new deploys until you are back under capacity.
-- **Sandbox (until Stage 3 adds turn flow):** switch the active player, give any card, and *Reposition* a ship to any open tile to see control and CP change.
 
 The engine (`src/game/`) is a pure, JSON-serialisable state that only changes through `applyAction()`, which validates every action.
+
+### Stage 3: Turn flow
+
+- **Hot-seat handoff:** each turn starts on a "Pass the device to …" screen that hides the hand until that player confirms. The previous player's hand is never shown to the next player.
+- **Play cards in any order:**
+  - **Credits** add to your credits for this turn.
+  - **Ship** cards deploy (see Stage 2).
+  - **Move** cards move one ship up to its speed:
+    - pick the ship, then a highlighted destination;
+    - badges show the movement used, and hovering previews the path;
+    - asteroid fields cost 2 and void is impassable;
+    - ships must stop when they enter a tile with enemy ships or pirates (they can't fly through), so choke points can be held;
+    - each nebula entered deals 1 damage, which can destroy the ship; its card returns to the discard pile.
+  - **Attack** cards unlock in Stage 4.
+- **Hidden tiles** are revealed when a ship ends its move there:
+  - a derelict gives +2 credits;
+  - a bonus cache draws 1 card;
+  - a pirate nest spawns a pirate fleet.
+- **Shipyard:** buy a Fighter, Freighter, Frigate or Destroyer at any point in your turn, as many as you can afford. Bought cards go to your discard pile. Ships cost 1 less while you control a station.
+- **End turn:**
+  - unspent credits are lost (the dialog warns you);
+  - choose up to 2 cards to keep;
+  - the rest of your hand and your played cards are discarded, and you draw back up to 5.
+- **End of round:** each controlled key planet scores 2 VP, a round summary is shown, and the first player rotates. The pirate phase, trade agreements and the uncertain ending arrive in Stage 5.
 
 ## Layout
 
@@ -85,7 +108,8 @@ src/render/sprites.js   pixel-art hex tiles and sprites (procedural + hand-drawn
 src/render/board.js     canvas hex board: integer zoom, pan, hit testing, crisp text
 src/game/ships.js       ship stats, CP costs, pirate fleets
 src/game/cards.js       card definitions and the starting deck
-src/game/state.js       game state, control, Command Points, actions
+src/game/state.js       game state, control, CP, turn flow, actions
+src/game/movement.js    movement range and paths on the hex board
 src/render/units.js     ships, control outlines and deploy targets on the board
 src/ui/                 screens: setup, game, Map Lab; cards; details pane
 tests/                  node --test suites
