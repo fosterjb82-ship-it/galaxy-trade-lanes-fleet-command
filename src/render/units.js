@@ -32,6 +32,25 @@ export function unitLayer(getView) {
       board.blit(sprite('outline:6dffa8:1'), n.x - TILE_W / 2, n.y - TILE_H / 2);
     }
 
+    // Trade routes: dashed lines in the owner's colour (red-tinted if blockaded).
+    for (const r of view.routes ?? []) {
+      const ctx = board.ctx;
+      ctx.save();
+      ctx.strokeStyle = r.blockaded ? 'rgba(255, 93, 93, 0.85)' : PLAYER_COLORS[r.owner].light;
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = board.px(2.5);
+      ctx.setLineDash([board.px(2), board.px(5)]);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      r.path.forEach((t, i) => {
+        const p = board.toScreen(map.nodes[t].x, map.nodes[t].y + 9);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Planned route (vector, native resolution) under the ships.
     if (path && path.length > 1) {
       const ctx = board.ctx;

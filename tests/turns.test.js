@@ -6,7 +6,7 @@ import {
 import { reachable } from '../src/game/movement.js';
 import { hexDistance } from '../src/map/hex.js';
 
-const game = (n = 3, seed = 'TURN-1') => createGame({ seed, players: ['Ada', 'Bo', 'Cy', 'Di', 'Ed', 'Flo'].slice(0, n) });
+const game = (n = 3, seed = 'TURN-1') => createGame({ missions: 'auto', seed, players: ['Ada', 'Bo', 'Cy', 'Di', 'Ed', 'Flo'].slice(0, n) });
 const find = (g, pid, def) => g.players[pid].hand.find((u) => g.cards[u].def === def);
 const act = (g, a) => applyAction(g, a);
 

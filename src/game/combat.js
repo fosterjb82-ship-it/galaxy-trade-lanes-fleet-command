@@ -15,8 +15,24 @@ export const CANNON_PIERCE = 2;
 export const EVASIVE_REDUCTION = 2;
 export const EMERGENCY_SHIELDS = 3;
 
-/** Upgrade effects on combat stats; the upgrade cards arrive with the market. */
-export const UPGRADE_EFFECTS = {};
+/** Upgrade effects on a ship's stats, keyed by upgrade card id. */
+export const UPGRADE_EFFECTS = {
+  'laser-battery': (s) => s.weapons.filter((w) => w.type === 'laser').forEach((w) => { w.damage += 1; }),
+  'heavy-cannon': (s) => {
+    const cur = s.weapons[0];
+    s.weapons[0] = { type: 'cannon', damage: cur?.type === 'cannon' ? Math.max(3, cur.damage) : 3, range: 0 };
+  },
+  'missile-rack': (s) => s.weapons.push({ type: 'missile', damage: 2, range: 1 }),
+  'ion-emitter': (s) => s.weapons.push({ type: 'ion', damage: 0, range: 0 }),
+  'deflector-shields': (s) => { s.shields += 2; },
+  'armor-plating': (s) => { s.armor += 1; },
+  'pd-grid': (s) => { s.pointDefense = true; },
+  afterburners: (s) => { s.speed += 1; },
+  'cargo-pod': (s) => { s.cargoPod = true; },
+  'cloaking-device': (s) => { s.cloaked = true; },
+  'targeting-computer': (s) => { s.pierce += 1; },
+  'repair-drones': (s) => { s.repairDrones = true; },
+};
 
 /** Effective stats for a ship: base ship type plus any upgrades. */
 export function shipStats(state, ship) {

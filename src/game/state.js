@@ -7,23 +7,36 @@
 
 import { generateMap, tileGraph } from '../map/generator.js';
 import { Rng } from '../rng.js';
-import { CARDS, CARD_TYPE, STARTING_DECK, cardDef } from './cards.js';
+import { CARDS, CARD_TYPE, STARTING_DECK, MARKET_DECK, MARKET_ROW_SIZE, cardDef } from './cards.js';
 import { SHIPS, PIRATE, shipDef } from './ships.js';
 import { reachable } from './movement.js';
 import {
   shipStats, damageFor, inRange, attackOptions, cannotAttack, describeDamage, EMERGENCY_SHIELDS,
 } from './combat.js';
 import { neighbors, key as hexKey } from '../map/hex.js';
+import {
+  routeOptions, pruneRoutes, blockaded, routeIncome, routesOf, activeAgreements, agreementBetween, offerCheck,
+  isTrader, BREAK_BONUS,
+} from './trade.js';
+import { MISSIONS, missionDone, missionPool } from './missions.js';
+import { piratePhase } from './pirates.js';
 
 export const HAND_SIZE = 5;
 export const MAX_KEEP = 2;
 export const KEY_PLANET_VP = 2;
+export const AGREEMENT_VP = 1;
+
+/** Chance the game ends after each round (DESIGN.md "Uncertain ending"). */
+export const END_CHANCE = {
+  standard: { 7: 1 / 3, 8: 1 / 2, 9: 1 / 2, 10: 1 },
+  quick: { 3: 1 / 2, 4: 1 }, // for trying the ending without a full game
+};
+export const END_ODDS_LABEL = { [1 / 3]: '1 in 3', [1 / 2]: '1 in 2', 1: 'certain' };
 
 /** Ship cards the Shipyard always sells. */
 export const SHIPYARD = ['ship-fighter', 'ship-freighter', 'ship-frigate', 'ship-destroyer'];
 
-/** Temporary shop for reaction and repair cards until the Market Row (Stage 5). */
-export const ARMORY = ['return-fire', 'evasive', 'point-defense', 'emergency-shields', 'retreat', 'ambush', 'repair', 'field-repairs'];
+
 
 /** What hidden tiles hold, revealed when a ship arrives. */
 export const HIDDEN_EFFECT = {
@@ -42,12 +55,12 @@ export class GameError extends Error {}
 /**
  * @param {{ seed: string, players: string[], mapSeed?: string }} opts
  */
-export function createGame({ seed, players, mapSeed = seed }) {
+export function createGame({ seed, players, mapSeed = seed, length = 'standard', missions = 'draft' }) {
   if (players.length < 2 || players.length > 6) throw new GameError('Fleet Command needs 2–6 players');
   const map = generateMap(mapSeed, players.length);
   const pirates = map.pirates;
   const state = {
-    version: 1,
+    version: 2,
     seed,
     mapSeed,
     map: { ...map, pirates: [] },
@@ -59,6 +72,13 @@ export function createGame({ seed, players, mapSeed = seed }) {
     phase: 'action',
     pending: null, // an attack or ambush waiting for the defender's reaction
     rounds: [], // end-of-round scoring summaries
+    settings: { length },
+    market: { deck: [], row: [] },
+    scrapped: [],
+    routes: [], // { id, owner, ship, a, b, path, length, label }
+    agreements: [], // { id, a, b }
+    notices: [], // public announcements for the UI (missions scored, …)
+    final: null,
     players: players.map((name, i) => ({
       id: i,
       name: name || `Player ${i + 1}`,
@@ -74,6 +94,12 @@ export function createGame({ seed, players, mapSeed = seed }) {
       kills: 0,
       losses: 0,
       killLog: [], // { type, owner } of each ship destroyed (missions)
+      vpFrom: { planets: 0, agreements: 0, kills: 0, missions: 0 },
+      missionOffer: [], // 3 dealt at the start; keep 2
+      missions: [], // { id, scored }
+      longestRoute: 0,
+      bestSpend: 0,
+      deepStrikeShips: [],
     })),
     cards: {},
     ships: [],
@@ -101,6 +127,23 @@ export function createGame({ seed, players, mapSeed = seed }) {
     }
   });
   for (const player of state.players) drawCards(state, player.id, HAND_SIZE);
+
+  withRng(state, (rng) => {
+    // Market deck and the face-up row of 6.
+    for (const [def, count] of MARKET_DECK) for (let i = 0; i < count; i++) state.market.deck.push(newCard(state, def, null));
+    rng.shuffle(state.market.deck);
+    state.market.row = state.market.deck.splice(0, MARKET_ROW_SIZE);
+    // Secret missions: deal 3 each.
+    const pool = rng.shuffle(missionPool(players.length));
+    for (const player of state.players) player.missionOffer = pool.splice(0, 3);
+  });
+  // 'auto' (tests, quick setups) keeps the first 2 dealt.
+  if (missions === 'auto') {
+    for (const player of state.players) {
+      player.missions = player.missionOffer.slice(0, 2).map((id) => ({ id, scored: false }));
+      player.missionOffer = [];
+    }
+  }
   log(state, `Round 1 begins. ${state.players[0].name} goes first.`);
   startTurn(state);
   return state;
@@ -270,8 +313,42 @@ function startTurn(state) {
       events.push(`${shipDef(ship).name} repaired ${heal} hull ${where}.`);
     }
   }
+  // Repair Drones.
+  for (const ship of shipsOf(state, p.id)) {
+    if (shipStats(state, ship).repairDrones && ship.hull < maxHull(ship)) {
+      ship.hull += 1;
+      events.push(`Repair drones fix 1 hull on a ${shipDef(ship).name.toLowerCase()}.`);
+    }
+  }
+  // Trade route and agreement income.
+  let income = 0;
+  for (const r of routesOf(state, p.id)) {
+    if (blockaded(state, r)) events.push(`Route ${r.label} is blockaded: no income.`);
+    else income += routeIncome(state, r);
+  }
+  const deals = activeAgreements(state, p.id).length;
+  income += deals;
+  if (income) {
+    p.credits += income;
+    events.push(`Trade income: +${income} credit${income === 1 ? '' : 's'}${deals ? ` (incl. ${deals} from agreements)` : ''}.`);
+  }
+  // Deep Strike: a ship that ended your last turn in an enemy home and is still there.
+  if (p.deepStrikeShips.some((id) => {
+    const sh = state.ships.find((x) => x.id === id);
+    const n = sh && state.map.nodes[sh.tile];
+    return n && n.type === 'home' && n.homeOf !== p.id;
+  })) p.deepStrikeDone = true;
+  p.deepStrikeShips = [];
+  if (p.backstab && state.turnNumber > p.backstab.until) p.backstab = null;
   for (const e of events) log(state, `${p.name}: ${e}`);
   state.turnStart = { player: p.id, turnNumber: state.turnNumber, events };
+  checkMissions(state);
+}
+
+function awardVP(state, pid, n, source) {
+  const p = state.players[pid];
+  p.vp += n;
+  p.vpFrom[source] += n;
 }
 
 /** Remove a ship: its card and upgrades go back to the owner's discard pile. */
@@ -286,37 +363,108 @@ export function destroyShip(state, shipId, { by = null, cause = '' } = {}) {
   }
   if (by !== null && by !== 'pirate') {
     const killer = state.players[by];
-    killer.vp += 1;
+    awardVP(state, by, 1, 'kills');
     killer.kills += 1;
     killer.killLog.push({ type: ship.type, owner: ship.owner });
+    if (killer.backstab && killer.backstab.target === ship.owner && state.turnNumber <= killer.backstab.until) killer.backstabDone = true;
   }
+  pruneRoutes(state, (t) => log(state, t));
   log(state, `${ship.owner === 'pirate' ? 'A pirate fleet' : `${state.players[ship.owner].name}'s ${shipDef(ship).name.toLowerCase()}`} was destroyed${cause ? ` ${cause}` : ''}${by !== null && by !== 'pirate' ? ` (+1 VP to ${state.players[by].name})` : ''}.`);
   return ship;
 }
 
-/** End-of-round scoring: 2 VP per controlled key planet. */
+/**
+ * End of round: 2 VP per controlled key planet and 1 VP per active trade
+ * agreement; then the pirate phase; then the roll for the uncertain ending.
+ */
 function endRound(state) {
   const control = controlMap(state);
   const scores = state.players.map((p) => {
     const keys = [...control].filter(([tile, owner]) => owner === p.id && state.map.nodes[tile].type === 'key').map(([t]) => t);
-    const vp = keys.length * KEY_PLANET_VP;
-    p.vp += vp;
-    return { player: p.id, keys, vp, total: p.vp };
+    const planetVp = keys.length * KEY_PLANET_VP;
+    const deals = activeAgreements(state, p.id).length;
+    awardVP(state, p.id, planetVp, 'planets');
+    awardVP(state, p.id, deals * AGREEMENT_VP, 'agreements');
+    return { player: p.id, keys, agreements: deals, vp: planetVp + deals * AGREEMENT_VP, total: p.vp };
   });
-  state.rounds.push({ round: state.round, scores });
   for (const sc of scores) {
-    if (sc.vp) log(state, `${state.players[sc.player].name} scores ${sc.vp} VP for ${sc.keys.length} key planet${sc.keys.length > 1 ? 's' : ''}.`);
+    if (sc.vp) log(state, `${state.players[sc.player].name} scores ${sc.vp} VP (${sc.keys.length} key planet${sc.keys.length === 1 ? '' : 's'}, ${sc.agreements} agreement${sc.agreements === 1 ? '' : 's'}).`);
   }
-  // Pirate phase and the uncertain ending arrive in Stage 5.
+  const pirates = piratePhase(state, destroyShip, (sh) => shipLabel(state, sh));
+  for (const e of pirates) log(state, e);
+  checkMissions(state);
+
+  // Uncertain ending.
+  const chance = END_CHANCE[state.settings?.length ?? 'standard'][state.round] ?? 0;
+  const roll = chance > 0 ? withRng(state, (rng) => rng.next()) : null;
+  const ends = chance >= 1 || (roll !== null && roll < chance);
+  state.rounds.push({ round: state.round, scores, pirates, ending: { chance, roll, ends } });
+  if (chance > 0) log(state, ends ? 'Imperial Ceasefire! The war is over.' : `The ceasefire talks fail (${END_ODDS_LABEL[chance]} chance). The war goes on.`);
+  if (ends) {
+    finalScoring(state);
+    return;
+  }
   state.round++;
   state.firstPlayer = (state.firstPlayer + 1) % state.players.length;
   state.turnInRound = 0;
   log(state, `Round ${state.round} begins. ${state.players[state.firstPlayer].name} goes first.`);
 }
 
+/** Final scoring: reveal end-of-game missions, then rank with tiebreakers. */
+function finalScoring(state) {
+  state.phase = 'over';
+  state.pending = null;
+  const control = controlMap(state);
+  const keysOf = (pid) => [...control].filter(([t, o]) => o === pid && state.map.nodes[t].type === 'key').length;
+  for (const p of state.players) {
+    for (const m of p.missions) {
+      const def = MISSIONS[m.id];
+      if (m.scored || def.timing !== 'end') continue;
+      m.revealed = true;
+      if (missionDone(state, p, m.id)) {
+        m.scored = true;
+        awardVP(state, p.id, def.vp, 'missions');
+        log(state, `${p.name} reveals ${def.name}: +${def.vp} VP.`);
+      } else {
+        m.failed = true;
+      }
+    }
+  }
+  const ranking = [...state.players].map((p) => ({
+    player: p.id, vp: p.vp, keys: keysOf(p.id), ships: shipsOf(state, p.id).length,
+  })).sort((a, b) => b.vp - a.vp || b.keys - a.keys || b.ships - a.ships);
+  ranking.forEach((r, i) => {
+    const prev = ranking[i - 1];
+    r.place = prev && prev.vp === r.vp && prev.keys === r.keys && prev.ships === r.ships ? prev.place : i + 1;
+    r.tiebreak = prev && prev.vp === r.vp ? (prev.keys !== r.keys ? 'key planets' : prev.ships !== r.ships ? 'ships on the board' : 'shared') : null;
+  });
+  state.final = { round: state.round, ranking };
+  const top = ranking.filter((r) => r.place === 1).map((r) => state.players[r.player].name);
+  log(state, top.length > 1 ? `${top.join(' and ')} share the win with ${ranking[0].vp} VP!` : `${top[0]} wins with ${ranking[0].vp} VP!`);
+}
+
+/** Reveal and score any immediate missions that are now complete. */
+function checkMissions(state) {
+  for (const p of state.players) {
+    for (const m of p.missions) {
+      const def = MISSIONS[m.id];
+      if (m.scored || def.timing !== 'immediate') continue;
+      if (missionDone(state, p, m.id)) {
+        m.scored = true;
+        m.revealed = true;
+        awardVP(state, p.id, def.vp, 'missions');
+        const text = `${p.name} completes the secret mission ${def.name}: +${def.vp} VP.`;
+        log(state, text);
+        state.notices.push({ kind: 'mission', player: p.id, mission: m.id, text });
+      }
+    }
+  }
+}
+
 function requireTurn(state, player) {
   if (state.phase !== 'action') throw new GameError('The game is over.');
   if (state.pending) throw new GameError(`Waiting for ${state.players[state.pending.defender].name} to respond.`);
+  if (state.players[player]?.missionOffer.length) throw new GameError('Choose your 2 secret missions first.');
   if (player !== state.active) throw new GameError(`It is ${state.players[state.active].name}'s turn.`);
 }
 
@@ -351,16 +499,29 @@ function revealHidden(state, ship) {
 }
 
 /** Tiles a player's ship can reach with a Move card right now. */
-export function moveTargets(state, shipId) {
+export function moveTargets(state, shipId, speedBonus = 0) {
   const ship = state.ships.find((s) => s.id === shipId);
   if (!ship || ship.disabled) return new Map();
-  return reachable(state, ship);
+  return reachable(state, ship, shipStats(state, ship).speed + speedBonus);
 }
 
 // ---------------------------------------------------------------- combat
 
 const shipById = (state, id) => state.ships.find((s) => s.id === id);
 const shipLabel = (state, s) => (s.owner === 'pirate' ? 'pirate fleet' : `${state.players[s.owner].name}'s ${shipDef(s).name.toLowerCase()}`);
+
+/** Why this upgrade can't go on this ship, or null. */
+export function upgradeCheck(state, ship, defId) {
+  const def = CARDS[defId];
+  if (!def || def.type !== CARD_TYPE.UPGRADE) return 'Not an upgrade card.';
+  const sd = SHIPS[ship.type];
+  if (!sd) return 'Pirates cannot be upgraded.';
+  if (ship.upgrades.length >= sd.slots) return `No free upgrade slot (${sd.name}: ${sd.slots}).`;
+  if (ship.upgrades.some((u) => state.cards[u].def === defId)) return `Already fitted with ${def.name}.`;
+  if (def.only && !def.only.includes(ship.type)) return `${def.name} only fits ${def.only.map((t) => SHIPS[t].name.toLowerCase() + 's').join(' and ')}.`;
+  if (def.needs === 'laser' && !shipStats(state, ship).weapons.some((w) => w.type === 'laser')) return `${def.name} needs a laser weapon.`;
+  return null;
+}
 
 /** Neighbouring tiles a ship can retreat to. */
 export function retreatTiles(state, ship) {
@@ -496,7 +657,10 @@ export function applyAction(prev, action) {
   const state = structuredClone(prev);
   const handler = HANDLERS[action.type];
   if (!handler) throw new GameError(`Unknown action ${action.type}`);
+  state.notices = [];
   handler(state, action);
+  pruneRoutes(state, (t) => log(state, t));
+  if (state.phase === 'action') checkMissions(state);
   return state;
 }
 
@@ -515,12 +679,99 @@ const HANDLERS = {
     log(state, `${p.name} deployed a ${SHIPS[def.ship].name.toLowerCase()} at ${state.map.nodes[tile].name ?? 'open space'}.`);
   },
 
-  playCredit(state, { player, card }) {
+  playCredit(state, { player, card, discard = null }) {
     requireTurn(state, player);
-    const def = takeFromHand(state, player, card, CARD_TYPE.CREDIT);
     const p = state.players[player];
+    const pre = state.cards[card] && cardDef(state.cards[card]);
+    if (pre?.discard && p.hand.length > 1) {
+      if (!discard || discard === card || !p.hand.includes(discard)) throw new GameError(`${pre.name}: choose another card from your hand to discard.`);
+    }
+    const def = takeFromHand(state, player, card, CARD_TYPE.CREDIT);
     p.played.push(card);
     p.credits += def.credits;
+    if (def.discard && discard && p.hand.includes(discard)) {
+      p.hand.splice(p.hand.indexOf(discard), 1);
+      p.discard.push(discard);
+    }
+  },
+
+  chooseMissions(state, { player, keep }) {
+    const p = state.players[player];
+    if (!p.missionOffer.length) throw new GameError('Missions already chosen.');
+    if (keep.length !== 2 || new Set(keep).size !== 2 || keep.some((m) => !p.missionOffer.includes(m))) throw new GameError('Keep exactly 2 of the 3 missions you were dealt.');
+    p.missions = keep.map((id) => ({ id, scored: false }));
+    p.missionOffer = [];
+  },
+
+  playUpgrade(state, { player, card, ship: shipId }) {
+    requireTurn(state, player);
+    const ship = shipById(state, shipId);
+    if (!ship || ship.owner !== player) throw new GameError('Choose one of your own ships.');
+    const why = upgradeCheck(state, ship, state.cards[card]?.def);
+    if (why) throw new GameError(why);
+    takeFromHand(state, player, card, CARD_TYPE.UPGRADE);
+    ship.upgrades.push(card);
+    log(state, `${state.players[player].name} fitted ${CARDS[state.cards[card].def].name} to a ${shipDef(ship).name.toLowerCase()}.`);
+  },
+
+  scrap(state, { player, card, target }) {
+    requireTurn(state, player);
+    const p = state.players[player];
+    const pre = state.cards[card] && cardDef(state.cards[card]);
+    if (!pre?.scrap) throw new GameError('That card cannot scrap.');
+    if (!target || target === card || !p.hand.includes(target)) throw new GameError('Choose another card from your hand to scrap.');
+    takeFromHand(state, player, card, CARD_TYPE.UTILITY);
+    p.played.push(card);
+    p.hand.splice(p.hand.indexOf(target), 1);
+    state.scrapped.push(target);
+    log(state, `${p.name} scrapped a ${CARDS[state.cards[target].def].name} card.`);
+  },
+
+  establishRoute(state, { player, ship: shipId, to }) {
+    requireTurn(state, player);
+    const ship = shipById(state, shipId);
+    if (!ship || ship.owner !== player || !isTrader(ship)) throw new GameError('Only your freighters and blockade runners run trade routes.');
+    const opt = routeOptions(state, ship).find((r) => r.to === to);
+    if (!opt) throw new GameError('Choose another trade node within range (your ship must be on a trade node).');
+    state.routes = state.routes.filter((r) => r.ship !== shipId);
+    const label = `${tileName(state, ship.tile)} – ${tileName(state, to)}`;
+    state.routes.push({ id: `r${state.nextId++}`, owner: player, ship: shipId, a: ship.tile, b: to, path: opt.path, length: opt.length, label });
+    const p = state.players[player];
+    p.longestRoute = Math.max(p.longestRoute, opt.length);
+    log(state, `${p.name} set up a trade route ${label} (${opt.length} jump${opt.length === 1 ? '' : 's'}).`);
+  },
+
+  offerAgreement(state, { player, to }) {
+    requireTurn(state, player);
+    const why = offerCheck(state, player, to);
+    if (why) throw new GameError(why);
+    state.pending = { kind: 'offer', defender: to, from: player };
+    log(state, `${state.players[player].name} offers a trade agreement to ${state.players[to].name}.`);
+  },
+
+  respondOffer(state, { player, accept }) {
+    const pend = state.pending;
+    if (!pend || pend.kind !== 'offer') throw new GameError('There is no offer to answer.');
+    if (player !== pend.defender) throw new GameError(`Only ${state.players[pend.defender].name} can answer.`);
+    state.pending = null;
+    if (accept) {
+      state.agreements.push({ id: `a${state.nextId++}`, a: pend.from, b: player });
+      log(state, `${state.players[player].name} accepts: trade agreement signed with ${state.players[pend.from].name}.`);
+    } else {
+      log(state, `${state.players[player].name} declines the trade agreement.`);
+    }
+    state.lastOffer = { from: pend.from, to: player, accepted: Boolean(accept) };
+  },
+
+  breakAgreement(state, { player, with: other }) {
+    requireTurn(state, player);
+    const ag = agreementBetween(state, player, other);
+    if (!ag) throw new GameError('You have no agreement with that player.');
+    state.agreements = state.agreements.filter((a) => a !== ag);
+    const p = state.players[player];
+    p.credits += BREAK_BONUS;
+    p.backstab = { target: other, until: state.turnNumber + state.players.length };
+    log(state, `${p.name} breaks the trade agreement with ${state.players[other].name} (+${BREAK_BONUS} credits).`);
   },
 
   move(state, { player, card, ship: shipId, tile }) {
@@ -528,11 +779,12 @@ const HANDLERS = {
     const ship = state.ships.find((s) => s.id === shipId);
     if (!ship || ship.owner !== player) throw new GameError('Choose one of your own ships to move.');
     if (ship.disabled) throw new GameError('That ship is disabled this turn.');
-    const route = moveTargets(state, shipId).get(tile);
-    if (!route) throw new GameError(`That tile is out of range (speed ${shipDef(ship).speed}).`);
     const p = state.players[player];
     const cardObj = state.cards[card];
-    if (!p.hand.includes(card) || cardDef(cardObj).name !== 'Move') throw new GameError('Play a Move card to move a ship.');
+    if (!p.hand.includes(card) || cardDef(cardObj).command !== 'move') throw new GameError('Play a Move card to move a ship.');
+    const bonus = cardDef(cardObj).speedBonus ?? 0;
+    const route = moveTargets(state, shipId, bonus).get(tile);
+    if (!route) throw new GameError(`That tile is out of range (speed ${shipStats(state, ship).speed + bonus}).`);
     p.hand.splice(p.hand.indexOf(card), 1);
     p.played.push(card);
     const nodes = state.map.nodes;
@@ -556,14 +808,28 @@ const HANDLERS = {
 
   buy(state, { player, def }) {
     requireTurn(state, player);
-    if (!SHIPYARD.includes(def) && !ARMORY.includes(def)) throw new GameError('That card is not for sale. (The Market Row arrives in Stage 5.)');
     const p = state.players[player];
-    const price = buyPrice(state, player, def);
-    if (p.credits < price) throw new GameError(`${CARDS[def].name} costs ${price}; you have ${p.credits} credit${p.credits === 1 ? '' : 's'}.`);
+    // def is a Shipyard card id, or `market` is the uid of a Market Row card.
+    const fromMarket = !SHIPYARD.includes(def);
+    const uid = fromMarket ? def : null;
+    if (fromMarket && !state.market.row.includes(uid)) throw new GameError('That card is not for sale.');
+    const defId = fromMarket ? state.cards[uid].def : def;
+    const price = buyPrice(state, player, defId);
+    if (p.credits < price) throw new GameError(`${CARDS[defId].name} costs ${price}; you have ${p.credits} credit${p.credits === 1 ? '' : 's'}.`);
     p.credits -= price;
     p.spent += price;
-    p.discard.push(newCard(state, def, player));
-    log(state, `${p.name} bought a ${CARDS[def].name.toLowerCase()} for ${price}.`);
+    p.bestSpend = Math.max(p.bestSpend, p.spent);
+    if (fromMarket) {
+      const i = state.market.row.indexOf(uid);
+      state.cards[uid].owner = player;
+      p.discard.push(uid);
+      // Replace the bought card immediately.
+      if (state.market.deck.length) state.market.row[i] = state.market.deck.shift();
+      else state.market.row.splice(i, 1);
+    } else {
+      p.discard.push(newCard(state, defId, player));
+    }
+    log(state, `${p.name} bought ${CARDS[defId].name} for ${price}.`);
   },
 
   attack(state, { player, card, ship: shipId, target: targetId, weapon = 0 }) {
@@ -575,8 +841,8 @@ const HANDLERS = {
     const target = shipById(state, targetId);
     if (!target || target.owner === player) throw new GameError('Choose an enemy ship or pirate fleet to attack.');
     const p = state.players[player];
-    if (!p.hand.includes(card) || cardDef(state.cards[card]).name !== 'Attack') throw new GameError('Play an Attack card to fire.');
-    const opt = attackOptions(state, ship).find((o) => o.target.id === targetId && o.weapon === weapon);
+    if (!p.hand.includes(card) || cardDef(state.cards[card]).command !== 'attack') throw new GameError('Play an Attack card to fire.');
+    const opt = attackOptions(state, ship, cardDef(state.cards[card]).bonus ?? 0).find((o) => o.target.id === targetId && o.weapon === weapon);
     if (!opt) throw new GameError('That target is out of range.');
     p.hand.splice(p.hand.indexOf(card), 1);
     p.played.push(card);
@@ -667,9 +933,18 @@ const HANDLERS = {
     // Ion-disabled ships recover once their owner has sat out a full turn.
     for (const s of shipsOf(state, player)) if (s.disabled !== undefined && s.disabled !== false && s.disabled < state.turnNumber) delete s.disabled;
 
+    // Deep Strike: remember ships ending this turn in an enemy home sector.
+    p.deepStrikeShips = shipsOf(state, player).filter((sh) => {
+      const n = state.map.nodes[sh.tile];
+      return n.type === 'home' && n.homeOf !== player;
+    }).map((sh) => sh.id);
+
     state.turnInRound++;
     state.turnNumber++;
-    if (state.turnInRound >= state.players.length) endRound(state);
+    if (state.turnInRound >= state.players.length) {
+      endRound(state);
+      if (state.phase === 'over') return;
+    }
     else state.active = turnOrder(state)[state.turnInRound];
     if (state.turnInRound === 0) state.active = state.firstPlayer;
     startTurn(state);
@@ -704,6 +979,9 @@ export function cardLocations(state) {
   for (const p of state.players) {
     for (const zone of ['deck', 'hand', 'discard', 'played', 'reserve']) for (const uid of p[zone]) put(uid, `${p.id}.${zone}`);
   }
+  for (const uid of state.market?.deck ?? []) put(uid, 'market deck');
+  for (const uid of state.market?.row ?? []) put(uid, 'market row');
+  for (const uid of state.scrapped ?? []) put(uid, 'scrapped');
   for (const s of state.ships) {
     if (s.card) put(s.card, `ship ${s.id}`);
     for (const u of s.upgrades) put(u, `ship ${s.id} upgrade`);

@@ -19,7 +19,7 @@ There is no build step: plain ES modules, no dependencies.
 | 2 | Core game state: decks, hands, ships on the board, Command Points | ✅ |
 | 3 | Turn flow: draw, play, buy, end turn, end-of-round scoring | ✅ Hot-seat turns |
 | 4 | Combat, reactions and repair | ✅ |
-| 5 | Market, trade routes, missions, pirates and the uncertain ending | — |
+| 5 | Market, trade routes, missions, pirates and the uncertain ending | ✅ Full game |
 
 ### Stage 1: Map Lab
 
@@ -114,7 +114,51 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
 - **Repairs:**
   - Repair (+2 hull) and Field Repairs (+4) cards work on any of your ships.
   - At the start of your turn, ships at a station you control repair fully, and ships sharing a tile with your carrier repair 2.
-- **Armory:** a temporary shop for reaction and repair cards until the Market Row arrives in Stage 5.
+
+### Stage 5: Market, trade, missions, pirates and the ending
+
+- **Market Row:**
+  - 6 face-up cards drawn from a shuffled 61-card market deck. A bought card is replaced immediately, and there is no paying to clear the row.
+  - The deck holds the 12 upgrades, Focused Strike (Attack +2), Full Burn (Move +1 speed), Trade Contract (+2), Smuggler's Cache (+3, then discard a card), Refit Dock (scrap a card for good), Repair and Field Repairs, all 6 reactions, and the rare ships (Missile Corvette, Interceptor, Blockade Runner, Carrier).
+  - Ship cards cost 1 less with a station.
+- **Upgrades:**
+  - Fit an upgrade to one of your ships anywhere on the board.
+  - Each uses a slot, duplicates aren't allowed, and some are restricted to certain ships (Heavy Cannon, Cargo Pod, Laser Battery).
+  - Effects feed straight into movement and the combat preview. Upgrades return to the discard pile with a destroyed ship.
+- **Trade routes:**
+  - A freighter or blockade runner on a trade node can set up a route to another trade node up to 8 jumps away, along the shortest open path. The route is drawn on the board in your colour.
+  - The ship must stay on the route's path, or the route closes.
+  - Income arrives at the start of your turn: +1, or +2 for routes of 3+ jumps, and +1 more with a Cargo Pod.
+  - Any enemy ship or pirate on the path is a blockade, and that route pays nothing.
+- **Trade agreements:**
+  - Offer one to a player who also runs a route. The game hands them the device to accept or decline in private.
+  - While both players run a route, each gets +1 credit per turn and 1 VP per round.
+  - Either player can break it on their own turn for a one-time 2 credits.
+- **Secret missions:**
+  - All 18 from the design. Everyone is dealt 3 and keeps 2 on their first turn.
+  - Your sidebar shows their progress, which is private.
+  - Immediate missions are revealed with a public announcement the moment they're done. End-of-game missions are revealed at final scoring.
+  - Diplomat and Backstabber are left out of 2-player games.
+- **Pirate phase (end of each round):** each pirate fleet moves 1 tile toward the nearest freighter or blockade runner, then attacks a player ship on its tile, preferring traders.
+- **Uncertain ending:**
+  - After round 7 there is a 1 in 3 chance the game ends; after rounds 8 and 9, 1 in 2; round 10 always ends it.
+  - The round summary shows the roll, with an "Imperial Ceasefire" alert when the war ends.
+  - A *Quick test* game length (end after round 3 or 4) lets you see the ending fast.
+- **Final scoring:**
+  - End-of-game missions are revealed and scored.
+  - Players are ranked on VP, then most key planets controlled, then most ships on the board.
+  - The results show each player's VP from planets, trade, kills and missions.
+
+## Rules decided where the design was silent or didn't fit the hex board
+
+- Control needs ships present (your empty home stays yours). Pirates block control but never hold it.
+- Ships stop when they enter a tile holding enemy ships or pirates.
+- Nebulas deal 1 damage on entry. Hidden tiles reveal when a ship ends its move on them.
+- Any 2 cards can be kept at the end of a turn. They form a hidden reserve, and only reaction cards in it can be played.
+- Each ship fires once per turn. Pirate kills score 1 VP. Cannons ignore 2 shield points.
+- Reaction prompts only appear when the defender holds reserve cards (the count is public).
+- Trade routes are paths between two trade nodes that the trader ship must stay on. Agreements need both players to run a route.
+- Defenders get no reaction prompt against pirate attacks, because the pirate phase runs automatically.
 
 ## Layout
 
@@ -127,10 +171,13 @@ src/map/graph.js        BFS, Dijkstra, components, betweenness
 src/render/sprites.js   pixel-art hex tiles and sprites (procedural + hand-drawn)
 src/render/board.js     canvas hex board: integer zoom, pan, hit testing, crisp text
 src/game/ships.js       ship stats, CP costs, pirate fleets
-src/game/cards.js       card definitions and the starting deck
+src/game/cards.js       card definitions, starting deck, market deck
 src/game/state.js       game state, control, CP, turn flow, actions
 src/game/movement.js    movement range and paths on the hex board
-src/game/combat.js      ship stats, damage maths, range, attack options
+src/game/combat.js      ship stats, upgrades, damage maths, range, attack options
+src/game/trade.js       trade routes, blockades, agreements
+src/game/missions.js    the 18 secret missions and their progress
+src/game/pirates.js     end-of-round pirate phase
 src/render/units.js     ships, control outlines and deploy targets on the board
 src/ui/                 screens: setup, game, Map Lab; cards; details pane
 tests/                  node --test suites

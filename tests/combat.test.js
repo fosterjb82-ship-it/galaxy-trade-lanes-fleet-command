@@ -6,7 +6,7 @@ import { hexDistance } from '../src/map/hex.js';
 import { SHIPS } from '../src/game/ships.js';
 
 const act = (g, a) => applyAction(g, a);
-const newGame = (n = 2, seed = 'WAR-1') => createGame({ seed, players: ['Ada', 'Bo', 'Cy'].slice(0, n) });
+const newGame = (n = 2, seed = 'WAR-1') => createGame({ missions: 'auto', seed, players: ['Ada', 'Bo', 'Cy'].slice(0, n) });
 
 /** Put a ship of `type` for `owner` on `tile` (card attached like a real deploy). */
 function spawn(g, owner, type, tile, hull) {

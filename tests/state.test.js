@@ -7,7 +7,7 @@ import {
 import { SHIPS } from '../src/game/ships.js';
 
 const NAMES = ['Ada', 'Bo', 'Cy', 'Di'];
-const newGame = (n = 4, seed = 'STATE-1') => createGame({ seed, players: NAMES.slice(0, n) });
+const newGame = (n = 4, seed = 'STATE-1') => createGame({ missions: 'auto', seed, players: NAMES.slice(0, n) });
 const handDefs = (state, pid) => state.players[pid].hand.map((u) => state.cards[u].def);
 
 test('every player starts with the same 10-card deck and a hand of 5', () => {
@@ -23,7 +23,7 @@ test('every player starts with the same 10-card deck and a hand of 5', () => {
 
 test('the fighter is always in the opening hand', () => {
   for (let i = 0; i < 60; i++) {
-    const g = createGame({ seed: `FIGHTER-${i}`, players: ['A', 'B', 'C'] });
+    const g = createGame({ missions: 'auto', seed: `FIGHTER-${i}`, players: ['A', 'B', 'C'] });
     for (const p of g.players) assert.ok(handDefs(g, p.id).includes('ship-fighter'), `seed ${i} player ${p.id}`);
   }
 });

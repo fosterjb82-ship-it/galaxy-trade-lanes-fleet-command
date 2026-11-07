@@ -8,19 +8,25 @@ import { CARDS, CARD_TYPE, cardDef } from '../game/cards.js';
 import { SHIPS, shipDef } from '../game/ships.js';
 import {
   applyAction, controllerOf, cpCapacity, cpUsed, deployCheck, shipsAt, shipsOf, moveTargets, buyPrice,
-  hasStation, turnOrder, tileName, GameError, SHIPYARD, ARMORY, MAX_KEEP, HAND_SIZE, reactionCheck, retreatTiles,
+  hasStation, turnOrder, tileName, GameError, SHIPYARD, MAX_KEEP, HAND_SIZE, reactionCheck, retreatTiles,
+  upgradeCheck, END_ODDS_LABEL, END_CHANCE,
 } from '../game/state.js';
+import {
+  routeOptions, routesOf, blockaded, routeIncome, activeAgreements, agreementBetween, offerCheck, isTrader, BREAK_BONUS,
+} from '../game/trade.js';
+import { MISSIONS, missionProgressText } from '../game/missions.js';
 import { attackOptions, describeDamage, shipStats } from '../game/combat.js';
 import { h, spriteIcon } from './dom.js';
 import { cardFace } from './card.js';
 import { tileDetails, tileTitle } from './details.js';
 import { loadGame, saveGame, clearGame } from './storage.js';
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const CP_LABEL = { home: 'Home sector', key: 'Key planet', station: 'Station' };
 
 export function mountGame(root) {
   let state = loadGame();
-  if (!state || state.version !== 1 || state.phase === undefined) {
+  if (!state || state.version !== 2) {
     clearGame();
     location.hash = '';
     return;
@@ -31,14 +37,14 @@ export function mountGame(root) {
   let openTile = null;
   let concealed = true; // hand hidden until the active player confirms (hot-seat)
   let devOpen = false;
-  let armoryOpen = false;
+  let marketOpen = true;
 
   // ---------------------------------------------------------- layout
   const roundLabel = h('span.round');
   const orderChips = h('div.turn-order');
   const toast = h('div.game-toast');
   const topbar = h('header.topbar',
-    h('div.brand', h('h1', 'Fleet Command'), h('span.stage', 'Stage 4 · Combat')),
+    h('div.brand', h('h1', 'Fleet Command'), h('span.stage', state.settings?.length === 'quick' ? 'Quick game' : 'Hot-seat prototype')),
     roundLabel, orderChips,
     h('span.spacer'),
     h('a.button', { href: `#lab&seed=${encodeURIComponent(state.mapSeed)}&players=${state.players.length}` }, 'Map Lab'),
@@ -70,8 +76,11 @@ export function mountGame(root) {
   const board = new Board(canvas);
   board.on('zoom', (s) => { zoomLabel.textContent = `${s}×`; });
   board.decorators.push(unitLayer(() => {
-    const view = { state, targets: [], selectedShip: null, labels: null, path: null };
-    if (['deploy', 'moveShip', 'attackShip', 'repair'].includes(mode.kind)) view.targets = mode.tiles;
+    const view = {
+      state, targets: [], selectedShip: null, labels: null, path: null,
+      routes: state.routes.map((r) => ({ path: r.path, owner: r.owner, blockaded: blockaded(state, r) })),
+    };
+    if (['deploy', 'moveShip', 'attackShip', 'repair', 'upgrade'].includes(mode.kind)) view.targets = mode.tiles;
     if (mode.kind === 'attackTarget') {
       view.selectedShip = mode.ship;
       view.targets = [...new Set(mode.options.map((o) => o.target.tile))];
@@ -108,6 +117,8 @@ export function mountGame(root) {
     try {
       state = applyAction(state, action);
       saveGame(state);
+      const missions = state.notices.filter((n) => n.kind === 'mission');
+      if (missions.length) queueMicrotask(() => announce(missions));
       return true;
     } catch (e) {
       if (!(e instanceof GameError)) throw e;
@@ -130,6 +141,26 @@ export function mountGame(root) {
     const defId = state.cards[uid].def;
     const def = cardDef(state.cards[uid]);
     if (mode.card === uid) return setMode({ kind: 'idle' });
+    if (def.type === CARD_TYPE.CREDIT && def.discard && me().hand.length > 1) {
+      return pickCardDialog(`${def.name}: +${def.credits} credits`, 'Choose a card from your hand to discard.', uid,
+        (other) => { if (dispatch({ type: 'playCredit', player: state.active, card: uid, discard: other })) say(`+${def.credits} credits.`); });
+    }
+    if (def.scrap) {
+      if (me().hand.length < 2) return say('You have no other card to scrap.', 'error');
+      return pickCardDialog(def.name, 'Choose a card to scrap. It is removed from the game for good: a great way to thin out basic Credits.', uid,
+        (other) => { if (dispatch({ type: 'scrap', player: state.active, card: uid, target: other })) say('Card scrapped.'); });
+    }
+    if (def.type === CARD_TYPE.UPGRADE) {
+      const ok = shipsOf(state, state.active).filter((s) => !upgradeCheck(state, s, defId));
+      if (!ok.length) return say(`No ship of yours can take ${def.name} (slots, duplicates or ship type).`, 'error');
+      closeDetails();
+      if (ok.length === 1) {
+        mode = { kind: 'idle' };
+        if (dispatch({ type: 'playUpgrade', player: state.active, card: uid, ship: ok[0].id })) say(`${def.name} fitted to your ${SHIPS[ok[0].type].name.toLowerCase()}.`);
+        return;
+      }
+      return setMode({ kind: 'upgrade', card: uid, tiles: [...new Set(ok.map((s) => s.tile))] });
+    }
     if (def.type === CARD_TYPE.CREDIT) {
       mode = { kind: 'idle' };
       if (dispatch({ type: 'playCredit', player: state.active, card: uid })) say(`+${def.credits} credit.`);
@@ -141,7 +172,7 @@ export function mountGame(root) {
       closeDetails();
       return setMode({ kind: 'deploy', card: uid, tiles: check.tiles });
     }
-    if (defId === 'attack') {
+    if (def.command === 'attack') {
       const ready = shipsOf(state, state.active).filter((s) => attackOptions(state, s, def.bonus).length > 0);
       if (!ready.length) return say('None of your ships has an enemy in range (same tile, or adjacent for missiles).', 'error');
       closeDetails();
@@ -157,8 +188,8 @@ export function mountGame(root) {
     if (def.type === CARD_TYPE.REACTION) {
       return say(`${def.name} is a reaction: keep it at the end of your turn to play it when an opponent attacks you.`);
     }
-    if (defId === 'move') {
-      const movable = shipsOf(state, state.active).filter((s) => moveTargets(state, s.id).size > 0);
+    if (def.command === 'move') {
+      const movable = shipsOf(state, state.active).filter((s) => moveTargets(state, s.id, def.speedBonus).size > 0);
       if (!movable.length) return say('You have no ship on the board that can move. Deploy one first.', 'error');
       closeDetails();
       if (movable.length === 1) return chooseShip(uid, movable[0].id);
@@ -187,7 +218,7 @@ export function mountGame(root) {
   }
 
   function chooseShip(card, shipId) {
-    setMode({ kind: 'moveDest', card, ship: shipId, routes: moveTargets(state, shipId) });
+    setMode({ kind: 'moveDest', card, ship: shipId, routes: moveTargets(state, shipId, CARDS[state.cards[card].def].speedBonus ?? 0) });
   }
 
   board.on('hover', () => { if (mode.kind === 'moveDest') board.invalidate(); });
@@ -224,6 +255,16 @@ export function mountGame(root) {
       if (here.length === 1) return fireAt(here[0]);
       return say('Several targets there: pick one from the bar above.');
     }
+    if (mode.kind === 'upgrade') {
+      const defId = state.cards[mode.card].def;
+      const ok = shipsAt(state, tile).filter((s) => s.owner === state.active && !upgradeCheck(state, s, defId));
+      if (!ok.length) return say('Pick a highlighted tile with a ship that can take this upgrade.', 'error');
+      if (ok.length > 1) return setMode({ ...mode, pickFrom: ok.map((s) => s.id) });
+      const { card } = mode;
+      mode = { kind: 'idle' };
+      if (dispatch({ type: 'playUpgrade', player: state.active, card, ship: ok[0].id })) say(`${CARDS[defId].name} fitted.`);
+      return;
+    }
     if (mode.kind === 'repair') {
       const mine = shipsAt(state, tile).filter((s) => s.owner === state.active && s.hull < SHIPS[s.type].hull);
       if (!mine.length) return say('Pick a highlighted tile with a damaged ship.', 'error');
@@ -242,6 +283,12 @@ export function mountGame(root) {
         const events = state.lastMove?.events ?? [];
         say(events.length ? events.join(' ') : `Moved to ${tileName(state, tile)} (${route.cost} movement).`);
         if (state.pending) defenderHandoff();
+        else {
+          const s = state.ships.find((x) => x.id === ship);
+          if (s && isTrader(s) && state.map.nodes[s.tile].type === 'trade' && !state.routes.some((r) => r.ship === s.id)) {
+            say(`Your ${SHIPS[s.type].name.toLowerCase()} is on a trade node: set up a trade route from the Trade panel.`);
+          }
+        }
       }
       return;
     }
@@ -347,7 +394,7 @@ export function mountGame(root) {
       confirmBtn.textContent = `End turn · keep ${keep.size}, draw ${HAND_SIZE - keep.size}`;
     };
     confirmBtn.onclick = () => {
-      const roundBefore = state.round;
+      const roundsBefore = state.rounds.length;
       hideOverlay();
       mode = { kind: 'idle' };
       closeDetails();
@@ -357,7 +404,7 @@ export function mountGame(root) {
         render();
         return;
       }
-      if (state.round !== roundBefore) roundSummary(state.rounds.at(-1));
+      if (state.rounds.length !== roundsBefore) roundSummary(state.rounds.at(-1));
       else handoff();
     };
     renderKeep();
@@ -374,21 +421,133 @@ export function mountGame(root) {
 
   function roundSummary(rs) {
     const ranked = [...state.players].sort((a, b) => b.vp - a.vp);
+    const end = rs.ending ?? { chance: 0 };
+    const over = state.phase === 'over';
+    const nextChance = END_CHANCE[state.settings?.length ?? 'standard'][state.round] ?? 0;
     showOverlay([
       h('div.kicker', `End of round ${rs.round}`),
       h('h2', 'Round scoring'),
       h('table.score',
-        h('thead', h('tr', h('th', 'Player'), h('th', 'Key planets held'), h('th', 'This round'), h('th', 'Total VP'))),
+        h('thead', h('tr', h('th', 'Player'), h('th', 'Key planets held'), h('th', 'Agreements'), h('th', 'This round'), h('th', 'Total VP'))),
         h('tbody', ranked.map((p) => {
           const sc = rs.scores.find((x) => x.player === p.id);
           return h('tr',
             h('td', h('span.swatch', { style: { background: PLAYER_COLORS[p.id].main } }), p.name),
             h('td', sc.keys.length ? sc.keys.map((t) => tileTitle(state.map.nodes[t])).join(', ') : '—'),
+            h('td', sc.agreements ? `${sc.agreements}` : '—'),
             h('td', sc.vp ? `+${sc.vp}` : '0'),
             h('td', h('b', p.vp)));
         }))),
-      h('p.muted.small', 'Each controlled key planet scores 2 VP at the end of every round. Trade agreements, the pirate phase and the uncertain ending arrive in Stage 5.'),
-      h('div.dialog-actions', h('button.primary.big', { onclick: handoff }, `Start round ${state.round}`)),
+      h('p.muted.small', 'Key planets score 2 VP each and active trade agreements 1 VP each, every round.'),
+      rs.pirates?.length > 0 && h('div',
+        h('h3.section', 'Pirate phase'),
+        combatLines(rs.pirates)),
+      end.chance > 0 && h(`div.ending${end.ends ? '.ends' : ''}`,
+        h('div.ending-title', end.ends ? 'IMPERIAL CEASEFIRE' : 'Ceasefire talks fail'),
+        h('div', end.ends
+          ? (end.chance >= 1 ? 'The final round has been fought. The Empire imposes peace.' : `The Senate votes for peace (${END_ODDS_LABEL[end.chance]} chance). The war is over.`)
+          : `The Senate debated a ceasefire (${END_ODDS_LABEL[end.chance]} chance) — but the war goes on.`)),
+      !over && nextChance > 0 && h('p.muted.small', `After round ${state.round}: ${END_ODDS_LABEL[nextChance]} chance the game ends.`),
+      h('div.dialog-actions', over
+        ? h('button.primary.big', { onclick: finalScreen }, 'Final scoring')
+        : h('button.primary.big', { onclick: handoff }, `Start round ${state.round}`)),
+    ]);
+  }
+
+  function finalScreen() {
+    concealed = false;
+    const f = state.final;
+    const rows = f.ranking.map((r) => {
+      const p = state.players[r.player];
+      const ms = p.missions.map((m) => {
+        const def = MISSIONS[m.id];
+        return h(`span.mission-chip${m.scored ? '.ok' : '.no'}`, { title: def.text }, `${m.scored ? '✔' : '✖'} ${def.name}${m.scored ? ` +${def.vp}` : ''}`);
+      });
+      return h(`tr${r.place === 1 ? '.winner' : ''}`,
+        h('td', h('b', r.place === 1 ? '🏆 1' : r.place)),
+        h('td', h('span.swatch', { style: { background: PLAYER_COLORS[p.id].main } }), p.name),
+        h('td', p.vpFrom.planets), h('td', p.vpFrom.agreements), h('td', p.vpFrom.kills), h('td', p.vpFrom.missions),
+        h('td', h('b.total', p.vp)),
+        h('td.small', plural(r.keys, 'planet'), ' · ', plural(r.ships, 'ship'), r.tiebreak && r.tiebreak !== 'shared' ? h('div.muted', `won tie on ${r.tiebreak}`) : null),
+        h('td', ms));
+    });
+    const winner = state.players[f.ranking[0].player];
+    const winners = f.ranking.filter((r) => r.place === 1).map((r) => state.players[r.player].name);
+    const headline = winners.length > 1
+      ? `${winners.slice(0, -1).join(', ')} and ${winners.at(-1)} share the win with ${winner.vp} VP`
+      : `${winner.name} wins with ${winner.vp} VP`;
+    showOverlay([
+      h('div.ending.ends', h('div.ending-title', 'IMPERIAL CEASEFIRE'), h('div', `The war ends after round ${f.round}.`)),
+      h('h2', { style: { color: PLAYER_COLORS[winner.id].light, marginTop: '14px' } }, headline),
+      h('table.score.final',
+        h('thead', h('tr', h('th', '#'), h('th', 'Player'), h('th', 'Planets'), h('th', 'Trade'), h('th', 'Kills'), h('th', 'Missions'), h('th', 'Total'), h('th', 'Tiebreak'), h('th', 'Secret missions'))),
+        h('tbody', rows)),
+      h('p.muted.small', 'Ties are broken by most key planets controlled, then most ships on the board.'),
+      h('div.dialog-actions',
+        h('button', { onclick: hideOverlay }, 'View the board'),
+        h('button.primary.big', { onclick: () => { clearGame(); location.hash = ''; } }, 'New game')),
+    ]);
+  }
+
+  /** Public announcement of completed missions. */
+  function announce(notices) {
+    if (overlay.classList.contains('show')) return say(notices.map((n) => n.text).join(' '));
+    showOverlay([
+      h('div.kicker', 'Secret mission revealed'),
+      ...notices.map((n) => {
+        const def = MISSIONS[n.mission];
+        return h('div.mission-reveal',
+          h('h2', { style: { color: PLAYER_COLORS[n.player].light } }, `${def.name}  +${def.vp} VP`),
+          h('p', `${state.players[n.player].name}: ${def.text}`));
+      }),
+      h('div.dialog-actions', h('button.primary.big', { onclick: () => { hideOverlay(); render(); } }, 'Continue')),
+    ]);
+  }
+
+  /** Choose another card from hand (Smuggler's Cache, Refit Dock). */
+  function pickCardDialog(title, text, source, onPick) {
+    const p = me();
+    showOverlay([
+      h('h2', title),
+      h('p.muted', text),
+      h('div.keep-cards', p.hand.filter((u) => u !== source).map((u) => cardFace(state.cards[u].def, {
+        owner: p.id, onClick: () => { hideOverlay(); onPick(u); },
+      }))),
+      h('div.dialog-actions', h('button', { onclick: hideOverlay }, 'Cancel')),
+    ]);
+  }
+
+  function missionDialog() {
+    const p = me();
+    const keep = new Set();
+    const list = h('div.mission-pick');
+    const ok = h('button.primary.big', { disabled: true }, 'Keep these 2');
+    const draw = () => {
+      list.replaceChildren(...p.missionOffer.map((id) => {
+        const def = MISSIONS[id];
+        return h(`button.mission-card${keep.has(id) ? '.on' : ''}`, {
+          onclick: () => {
+            if (keep.has(id)) keep.delete(id);
+            else if (keep.size < 2) keep.add(id);
+            draw();
+          },
+        },
+        h('div.mc-top', h('span.mc-kind', `${def.kind} · ${def.timing === 'immediate' ? 'Immediate' : 'End of game'}`), h('b.mc-vp', `${def.vp} VP`)),
+        h('div.mc-name', def.name),
+        h('div.mc-text', def.text));
+      }));
+      ok.disabled = keep.size !== 2;
+    };
+    ok.onclick = () => {
+      if (dispatch({ type: 'chooseMissions', player: p.id, keep: [...keep] })) hideOverlay();
+    };
+    draw();
+    showOverlay([
+      h('div.kicker', `${p.name}: secret missions`),
+      h('h2', 'Keep 2 of these 3 missions'),
+      h('p.muted', 'Missions stay secret until scored. Immediate missions are revealed and scored the moment you complete them; end-of-game missions are revealed at final scoring.'),
+      list,
+      h('div.dialog-actions', ok),
     ]);
   }
 
@@ -414,7 +573,9 @@ export function mountGame(root) {
     const c = PLAYER_COLORS[d.id];
     const attackerName = me().name;
     let what;
-    if (pend.kind === 'reaction') {
+    if (pend.kind === 'offer') {
+      what = `${attackerName} offers ${d.name} a trade agreement: +1 credit per turn and 1 VP per round each, while you both run a trade route.`;
+    } else if (pend.kind === 'reaction') {
       const atk = state.ships.find((s) => s.id === pend.attack.attacker);
       const tgt = state.ships.find((s) => s.id === pend.attack.target);
       what = `${attackerName}'s ${SHIPS[atk.type].name.toLowerCase()} attacks ${d.name}'s ${SHIPS[tgt.type].name.toLowerCase()}: ${describeDamage(pend.preview)} damage unless ${d.name} reacts.`;
@@ -423,11 +584,34 @@ export function mountGame(root) {
       what = `${attackerName}'s ${SHIPS[mv.type].name.toLowerCase()} moves onto ${tileTitle(state.map.nodes[pend.tile])}, where ${d.name} has ships.`;
     }
     showOverlay(h('div.handoff',
-      h('div.kicker', pend.kind === 'reaction' ? 'Incoming attack' : 'Enemy arrival'),
+      h('div.kicker', { reaction: 'Incoming attack', ambush: 'Enemy arrival', offer: 'Trade offer' }[pend.kind]),
       h('h2', { style: { color: c.light } }, `Pass the device to ${d.name}`),
       h('p', what),
-      h('p.muted', `${d.name} holds ${d.reserve.length} card${d.reserve.length === 1 ? '' : 's'} and may respond. ${attackerName}, look away.`),
-      h('button.primary.big', { style: { background: c.dark, borderColor: c.main }, onclick: reactionDialog }, `I'm ${d.name}: respond`)));
+      pend.kind === 'offer'
+        ? h('p.muted', `${d.name}, decide in private.`)
+        : h('p.muted', `${d.name} holds ${d.reserve.length} card${d.reserve.length === 1 ? '' : 's'} and may respond. ${attackerName}, look away.`),
+      h('button.primary.big', { style: { background: c.dark, borderColor: c.main }, onclick: pend.kind === 'offer' ? offerDialog : reactionDialog }, `I'm ${d.name}: respond`)));
+  }
+
+  function offerDialog() {
+    const pend = state.pending;
+    const from = state.players[pend.from];
+    const d = state.players[pend.defender];
+    const answer = (accept) => {
+      if (!dispatch({ type: 'respondOffer', player: d.id, accept })) return;
+      showOverlay([
+        h('div.kicker', 'Trade offer'),
+        h('h2', accept ? 'Agreement signed' : 'Offer declined'),
+        h('p', accept ? `${from.name} and ${d.name} now each earn +1 credit per turn and 1 VP per round while both run a trade route.` : `${d.name} declined ${from.name}'s offer.`),
+        h('div.dialog-actions', h('button.primary.big', { onclick: handoff }, `Back to ${from.name}`)),
+      ]);
+    };
+    showOverlay([
+      h('div.kicker', `${d.name}, respond`),
+      h('h2', `${from.name} offers a trade agreement`),
+      h('p', 'Both of you get +1 credit at the start of each turn and 1 VP at the end of every round, while you both still run a trade route. Either of you may break it on your own turn for a one-time 2 credits.'),
+      h('div.dialog-actions', h('button.big', { onclick: () => answer(false) }, 'Decline'), h('button.primary.big', { onclick: () => answer(true) }, 'Accept')),
+    ]);
   }
 
   function reactionDialog() {
@@ -495,6 +679,7 @@ export function mountGame(root) {
   }
 
   function handoff() {
+    if (state.phase === 'over') return finalScreen();
     concealed = true;
     render();
     const p = me();
@@ -513,6 +698,7 @@ export function mountGame(root) {
             render();
             const ev = state.turnStart?.player === p.id ? state.turnStart.events : [];
             if (ev?.length) say(`Start of turn: ${ev.join(' ')}`);
+            if (p.missionOffer.length) missionDialog();
           },
         }, `I'm ${p.name}: show my hand`)),
     ]);
@@ -570,6 +756,20 @@ export function mountGame(root) {
         return h('button', { title: describeDamage(o.preview), onclick: () => fireAt(o) },
           `${who} ${name} ${t.hull}/${max}: ${o.preview.ion ? 'ion' : `${o.preview.damage} dmg`} (${after})`);
       }), cancel];
+    } else if (mode.kind === 'upgrade') {
+      const def = CARDS[state.cards[mode.card].def];
+      content = mode.pickFrom
+        ? [h('span', `Fit ${def.name} to:`), ...mode.pickFrom.map((id) => {
+          const s = state.ships.find((x) => x.id === id);
+          return h('button', {
+            onclick: () => {
+              const { card } = mode;
+              mode = { kind: 'idle' };
+              if (dispatch({ type: 'playUpgrade', player: state.active, card, ship: id })) say(`${def.name} fitted.`);
+            },
+          }, `${SHIPS[s.type].name} (${s.upgrades.length}/${SHIPS[s.type].slots} slots)`);
+        }), cancel]
+        : [h('span', `Fit ${def.name}: click a highlighted tile with one of your ships.`), cancel];
     } else if (mode.kind === 'repair') {
       const def = CARDS[state.cards[mode.card].def];
       content = [h('span', `${def.name}: click a highlighted tile with a damaged ship (+${def.repair} hull).`), cancel];
@@ -601,13 +801,16 @@ export function mountGame(root) {
       } else if (def.type === CARD_TYPE.REACTION) {
         cs = 'locked';
         note = 'Reaction: keep it to use on opponents\' turns';
-      } else if (defId === 'attack' && !shipsOf(state, p.id).some((s) => attackOptions(state, s).length > 0)) {
+      } else if (def.type === CARD_TYPE.UPGRADE && !shipsOf(state, p.id).some((s) => !upgradeCheck(state, s, defId))) {
+        cs = 'blocked';
+        note = shipsOf(state, p.id).length ? 'No ship can take it (slots or type)' : 'Deploy a ship first';
+      } else if (def.command === 'attack' && !shipsOf(state, p.id).some((s) => attackOptions(state, s).length > 0)) {
         cs = 'blocked';
         note = 'No enemy in range of your armed ships';
       } else if (def.repair && !shipsOf(state, p.id).some((s) => s.hull < SHIPS[s.type].hull)) {
         cs = 'blocked';
         note = 'No damaged ship';
-      } else if (defId === 'move' && !shipsOf(state, p.id).some((s) => moveTargets(state, s.id).size > 0)) {
+      } else if (def.command === 'move' && !shipsOf(state, p.id).some((s) => moveTargets(state, s.id, def.speedBonus).size > 0)) {
         cs = 'blocked';
         note = 'No ship on the board to move';
       }
@@ -623,7 +826,7 @@ export function mountGame(root) {
       h('div.piles',
         h('div.pile', h('b', p.deck.length), h('span', 'Deck')),
         h('div.pile', h('b', p.discard.length), h('span', 'Discard'))),
-      h('button.end-turn', { onclick: endTurnDialog }, 'End turn'));
+      h('button.end-turn', { onclick: endTurnDialog, disabled: state.phase === 'over' }, state.phase === 'over' ? 'Game over' : 'End turn'));
   }
 
   function cpMeter(pid) {
@@ -656,22 +859,74 @@ export function mountGame(root) {
       : 'Bought cards go to your discard pile. Control a station to buy ships for 1 less.'));
   }
 
-  function armory(p) {
-    return h('details.armory', { open: armoryOpen, ontoggle: (e) => { armoryOpen = e.target.open; } },
-      h('summary', 'Reaction and repair cards (temporary shop until the Market Row in Stage 5)'),
-      h('div.shipyard', ARMORY.map((def) => {
-        const card = CARDS[def];
-        const price = buyPrice(state, p.id, def);
-        const afford = !concealed && p.credits >= price;
-        return h('div.yard-item',
-          spriteIcon(card.icon, 26),
-          h('div', h('div', h('b', card.name)), h('div.muted.small', card.text)),
-          h('button.buy', {
-            disabled: !afford,
-            title: afford ? `Buy for ${price}` : `Costs ${price}; you have ${p.credits}`,
-            onclick: () => { if (dispatch({ type: 'buy', player: p.id, def })) say(`Bought ${card.name}. It goes to your discard pile.`); },
-          }, h('span.price', price)));
-      })));
+  function market(p) {
+    return h('div.shipyard', state.market.row.map((uid) => {
+      const card = CARDS[state.cards[uid].def];
+      const price = buyPrice(state, p.id, state.cards[uid].def);
+      const afford = !concealed && p.credits >= price;
+      return h('div.yard-item',
+        spriteIcon(card.ship ? `ship:${card.ship}:${p.id}` : card.icon, 26),
+        h('div', h('div', h('b', card.name), h('span.muted.small', ` · ${card.upgradeKind ? `${card.upgradeKind} upgrade` : card.type}`)),
+          h('div.muted.small', card.text)),
+        h('button.buy', {
+          disabled: !afford,
+          title: afford ? `Buy for ${price}` : `Costs ${price}; you have ${p.credits}`,
+          onclick: () => { if (dispatch({ type: 'buy', player: p.id, def: uid })) say(`Bought ${card.name}. It goes to your discard pile.`); },
+        }, price < card.cost && h('s', card.cost), h('span.price', price)));
+    }), h('p.muted.small', `${state.market.deck.length} cards left in the market deck. A bought card is replaced immediately.`));
+  }
+
+  function tradePanel(p) {
+    const mine = routesOf(state, p.id);
+    const traders = shipsOf(state, p.id).filter((s) => isTrader(s) && state.map.nodes[s.tile].type === 'trade');
+    const deals = state.agreements.filter((a) => a.a === p.id || a.b === p.id);
+    const others = state.players.filter((o) => o.id !== p.id);
+    return h('div.trade',
+      mine.length
+        ? h('ul.routes', mine.map((r) => {
+          const blocked = blockaded(state, r);
+          return h('li', { onclick: () => openDetails(r.a) },
+            h('span', r.label), h('span.muted.small', plural(r.length, 'jump')),
+            h(`b.small${blocked ? '.warn' : ''}`, blocked ? 'blockaded' : `+${routeIncome(state, r)}/turn`));
+        }))
+        : h('p.muted.small', 'No trade routes. Move a freighter or blockade runner onto a trade node to set one up.'),
+      ...traders.map((s) => {
+        const opts = routeOptions(state, s);
+        const sel = h('select', { 'aria-label': 'Route destination' }, opts.map((o) => h('option', { value: o.to },
+          `to ${tileTitle(state.map.nodes[o.to])} · ${plural(o.length, 'jump')} · +${o.length >= 3 ? 2 : 1}`)));
+        return h('div.route-setup',
+          h('span.small', `${SHIPS[s.type].name} at ${tileTitle(state.map.nodes[s.tile])}:`),
+          sel,
+          h('button', { disabled: concealed || !opts.length, onclick: () => { if (dispatch({ type: 'establishRoute', player: p.id, ship: s.id, to: Number(sel.value) })) say('Trade route set up: income arrives at the start of your turns.'); } },
+            state.routes.some((r) => r.ship === s.id) ? 'Replace route' : 'Set up route'));
+      }),
+      h('div.deals',
+        h('div.small.muted', 'Trade agreements'),
+        ...others.map((o) => {
+          const ag = agreementBetween(state, p.id, o.id);
+          const active = ag && activeAgreements(state, p.id).includes(ag);
+          const why = offerCheck(state, p.id, o.id);
+          return h('div.deal-row',
+            h('span', h('span.swatch', { style: { background: PLAYER_COLORS[o.id].main } }), o.name),
+            ag
+              ? h('span.small', active ? h('b', 'Active · +1/turn, 1 VP/round') : h('span.muted', 'Signed (inactive: a route is missing)'))
+              : h('span.small.muted', why ?? 'Can offer'),
+            ag
+              ? h('button.small-btn', { disabled: concealed, title: `Break it for a one-time ${BREAK_BONUS} credits`, onclick: () => { if (confirm(`Break your agreement with ${o.name}? You gain ${BREAK_BONUS} credits.`)) dispatch({ type: 'breakAgreement', player: p.id, with: o.id }); } }, 'Break')
+              : h('button.small-btn', { disabled: concealed || Boolean(why), onclick: () => { if (dispatch({ type: 'offerAgreement', player: p.id, to: o.id })) defenderHandoff(); } }, 'Offer'));
+        })));
+  }
+
+  function missionPanel(p) {
+    if (concealed) return h('p.muted.small', 'Hidden until you show your hand.');
+    if (p.missionOffer.length) return h('button.primary', { onclick: missionDialog }, 'Choose your 2 secret missions');
+    return h('ul.missions', p.missions.map((m) => {
+      const def = MISSIONS[m.id];
+      return h(`li${m.scored ? '.scored' : ''}`,
+        h('div', h('b', def.name), h('span.muted.small', ` · ${def.timing === 'immediate' ? 'immediate' : 'end of game'} · ${def.vp} VP`)),
+        h('div.small.muted', def.text),
+        h('div.small', m.scored ? h('b.ok', 'Completed') : `Progress: ${missionProgressText(state, p, m.id)}`));
+    }));
   }
 
   function renderSidebar(p) {
@@ -695,8 +950,13 @@ export function mountGame(root) {
             h('span', `${CP_LABEL[b.type]} · ${b.label}`), h('b', `+${b.amount}`)))
           : h('li.muted', 'You control no CP-giving tiles.'))),
 
-      h('h2', 'Armory'),
-      armory(p),
+      h('h2', 'Secret missions'),
+      missionPanel(p),
+      h('h2', 'Trade'),
+      tradePanel(p),
+      h('details.market', { open: marketOpen, ontoggle: (e) => { marketOpen = e.target.open; } },
+        h('summary', h('h2', 'Market row')),
+        market(p)),
       h('h2', 'Shipyard'),
       shipyard(p),
 
@@ -711,13 +971,14 @@ export function mountGame(root) {
 
       h('h2', 'Players'),
       h('table.players',
-        h('thead', h('tr', h('th', 'Player'), h('th', 'VP'), h('th', 'CP'), h('th', 'Ships'), h('th', { title: 'Cards held in reserve for reactions (public count)' }, 'Held'), h('th', 'Deck'))),
+        h('thead', h('tr', h('th', 'Player'), h('th', 'VP'), h('th', 'CP'), h('th', 'Ships'), h('th', { title: 'Cards held in reserve for reactions (public count)' }, 'Held'), h('th', { title: 'Secret missions: scored / held' }, 'Missions'))),
         h('tbody', state.players.map((pl) => {
           const m = cpMeter(pl.id);
           return h(`tr${pl.id === p.id ? '.active' : ''}`,
             h('td', h('span.swatch', { style: { background: PLAYER_COLORS[pl.id].main } }), pl.name),
             h('td', pl.vp), h('td', `${m.used}/${m.cap.total}`), h('td', shipsOf(state, pl.id).length),
-            h('td', pl.id === p.id ? '—' : pl.reserve.length), h('td', `${pl.deck.length}+${pl.discard.length}`));
+            h('td', pl.id === p.id ? '—' : pl.reserve.length),
+            h('td', { title: pl.missions.filter((m) => m.scored).map((m) => MISSIONS[m.id].name).join(', ') }, `${pl.missions.filter((m) => m.scored).length}/${pl.missions.length || pl.missionOffer.length && 2}`));
         }))),
 
       h('h2', 'Log'),
@@ -733,7 +994,8 @@ export function mountGame(root) {
   }
 
   render();
-  if (state.pending) defenderHandoff();
+  if (state.phase === 'over') finalScreen();
+  else if (state.pending) defenderHandoff();
   else handoff();
   window.fleetCommand = {
     get state() { return state; }, board, dispatch, openDetails,

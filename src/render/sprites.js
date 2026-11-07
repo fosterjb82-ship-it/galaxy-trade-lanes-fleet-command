@@ -383,6 +383,21 @@ CARD_ROWS.react = [
   '............',
 ];
 
+CARD_ROWS.upgrade = [
+  '..k.k..k.k..',
+  '.kkkkkkkkkk.',
+  'kkggggggggkk',
+  '.kgGGGGGGgk.',
+  'kkgGccccGgkk',
+  '.kgGcwccGgk.',
+  'kkgGccccGgkk',
+  '.kgGccccGgk.',
+  'kkgGGGGGGgkk',
+  '.kggggggggk.',
+  '.kkkkkkkkkk.',
+  '..k.k..k.k..',
+];
+
 const STAR_ROWS = ['..w..', '.wyw.', 'wyyyw', '.wyw.', '..w..'];
 
 // ---------------------------------------------------------------- hex tiles

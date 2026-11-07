@@ -8,13 +8,18 @@ import { loadGame, saveGame } from './storage.js';
 
 export function mountSetup(root) {
   const saved = loadGame();
-  const state = { count: 4, names: PLAYER_COLORS.map((c, i) => `Player ${i + 1}`), seed: randomSeed() };
+  const state = { count: 4, names: PLAYER_COLORS.map((c, i) => `Player ${i + 1}`), seed: randomSeed(), length: 'standard' };
 
   const seedInput = h('input', { type: 'text', value: state.seed, size: 16, spellcheck: 'false', 'aria-label': 'Map seed' });
   seedInput.addEventListener('input', () => { state.seed = seedInput.value.trim(); renderLinks(); });
   const countRow = h('div.segmented');
   const namesBox = h('div.names');
   const labLink = h('a.button', { target: '_self' }, 'Preview map in Map Lab');
+  const lengthRow = h('div.length-row');
+  const LENGTHS = [
+    ['standard', 'Standard', '7–10 rounds; the end is uncertain from round 7'],
+    ['quick', 'Quick test', '3–4 rounds, to try the ending'],
+  ];
 
   function renderLinks() {
     labLink.href = `#lab&seed=${encodeURIComponent(state.seed || 'ORION-1')}&players=${state.count}`;
@@ -32,13 +37,16 @@ export function mountSetup(root) {
         h('span.swatch', { style: { background: PLAYER_COLORS[i].main } }),
         input);
     }));
+    lengthRow.replaceChildren(...LENGTHS.map(([id, label, hint]) => h(`label.length${state.length === id ? '.on' : ''}`,
+      h('input', { type: 'radio', name: 'length', checked: state.length === id, onchange: () => { state.length = id; render(); } }),
+      h('span', h('b', label), h('span.muted.small', ` · ${hint}`)))));
     renderLinks();
   }
 
   const start = () => {
     const players = state.names.slice(0, state.count).map((n, i) => n.trim() || `Player ${i + 1}`);
     const seed = state.seed || randomSeed();
-    const game = createGame({ seed, players });
+    const game = createGame({ seed, players, length: state.length });
     saveGame(game);
     location.hash = '#play';
   };
@@ -57,6 +65,8 @@ export function mountSetup(root) {
       h('div.seed-row', seedInput,
         h('button', { type: 'button', onclick: () => { seedInput.value = state.seed = randomSeed(); renderLinks(); } }, 'Random')),
       h('p.muted.small', 'The same seed and player count always produce the same board.'),
+      h('h2', 'Game length'),
+      lengthRow,
       h('div.actions', h('button.primary.big', { type: 'button', onclick: start }, saved ? 'Start new game' : 'Start game'), labLink))));
   render();
 }
