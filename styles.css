@@ -83,7 +83,7 @@ input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outli
 /* ---------------------------------------------------------------- layout */
 
 .main { flex: 1; display: flex; min-height: 0; }
-.board-wrap { flex: 1; position: relative; min-width: 0; }
+.board-wrap { flex: 1; position: relative; min-width: 0; overflow: hidden; }
 .board-wrap canvas.board { width: 100%; height: 100%; display: block; }
 .sidebar {
   width: 360px;
@@ -145,24 +145,97 @@ input[type="text"]:focus, select:focus { outline: 2px solid var(--accent); outli
 .toggles { display: grid; gap: 6px; }
 .toggles label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
 
-.inspector {
+/* ---------------------------------------------------------------- zoom */
+
+.zoom {
   position: absolute;
-  pointer-events: none;
-  background: rgba(13, 18, 34, 0.96);
+  top: 12px;
+  left: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  background: rgba(13, 18, 34, 0.92);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px 12px;
-  min-width: 200px;
-  max-width: 280px;
-  font-size: 13px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-  display: none;
-  z-index: 5;
+  padding: 6px;
+  z-index: 4;
 }
-.inspector .title { font-weight: 700; font-size: 14px; }
-.inspector .type { color: var(--accent); font-size: 12px; margin-bottom: 6px; }
-.inspector .row { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); }
-.inspector .row b { color: var(--text); font-weight: 600; }
+.zoom button { width: 36px; height: 32px; padding: 0; font-size: 18px; font-weight: 600; }
+.zoom button.fit { font-size: 12px; }
+.zoom-level { text-align: center; font-size: 12px; color: var(--muted); font-weight: 600; }
+
+/* ---------------------------------------------------------------- details pane */
+
+.details {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: 320px;
+  max-width: calc(100% - 80px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  z-index: 5;
+  transform: translateX(calc(100% + 24px));
+  visibility: hidden;
+  transition: transform 0.18s ease-out, visibility 0s linear 0.18s;
+}
+.details.open { transform: none; visibility: visible; transition: transform 0.18s ease-out; }
+.details .close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+.details .head { display: flex; gap: 14px; align-items: center; margin-bottom: 10px; padding-right: 30px; }
+.details .title { font-size: 18px; font-weight: 700; }
+.details .type { color: var(--accent); font-size: 13px; font-weight: 600; }
+.details .coords { color: var(--muted); font-size: 12px; }
+.details .effect { margin: 0 0 10px; color: #c3cbe6; }
+.details h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 16px 0 6px;
+}
+.details .row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid rgba(36, 48, 79, 0.6); }
+.details .row span { color: var(--muted); }
+.details .callout {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(155, 108, 255, 0.12);
+  border: 1px solid rgba(155, 108, 255, 0.4);
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.details .callout.danger { background: rgba(210, 60, 60, 0.12); border-color: rgba(210, 60, 60, 0.5); }
+.home-dist { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+.neighbours { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.neighbours li {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.neighbours li:hover { background: var(--panel-2); }
+.neighbours .muted { font-size: 12px; }
 
 .hint {
   position: absolute;

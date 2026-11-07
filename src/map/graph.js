@@ -117,22 +117,24 @@ export function shortestPath(adj, a, b) {
   return path;
 }
 
-/** Do segments p1-p2 and p3-p4 properly cross (shared endpoints don't count)? */
-export function segmentsCross(p1, p2, p3, p4) {
-  const d = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-  const d1 = d(p3, p4, p1);
-  const d2 = d(p3, p4, p2);
-  const d3 = d(p1, p2, p3);
-  const d4 = d(p1, p2, p4);
-  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
-}
-
-/** Distance from point p to segment a-b. */
-export function pointSegmentDistance(p, a, b) {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const len2 = dx * dx + dy * dy;
-  let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+/**
+ * Movement-cost distances from `start`: entering node v costs cost[v]
+ * (Infinity = impassable). Small graphs, so a simple O(n²) Dijkstra.
+ */
+export function dijkstra(adj, cost, start) {
+  const n = adj.length;
+  const dist = new Array(n).fill(Infinity);
+  const done = new Array(n).fill(false);
+  dist[start] = 0;
+  for (;;) {
+    let u = -1;
+    for (let i = 0; i < n; i++) if (!done[i] && dist[i] < Infinity && (u < 0 || dist[i] < dist[u])) u = i;
+    if (u < 0) break;
+    done[u] = true;
+    for (const v of adj[u]) {
+      const d = dist[u] + cost[v];
+      if (d < dist[v]) dist[v] = d;
+    }
+  }
+  return dist;
 }

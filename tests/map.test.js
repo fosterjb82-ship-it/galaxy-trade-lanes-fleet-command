@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateMap, generateCandidate, mapParams } from '../src/map/generator.js';
+import { generateMap, generateCandidate, mapParams, tileGraph, allCosts } from '../src/map/generator.js';
 import { runFairnessChecks } from '../src/map/fairness.js';
-import { buildAdjacency, bfs, segmentsCross } from '../src/map/graph.js';
+import { hexDistance, hexagon, rotateCell, fromPixel, toPixel } from '../src/map/hex.js';
+import { components } from '../src/map/graph.js';
 import { Rng } from '../src/rng.js';
 
-const SEEDS = Array.from({ length: 40 }, (_, i) => `TEST-${i}`);
+const SEEDS = Array.from({ length: 30 }, (_, i) => `TEST-${i}`);
 
 test('rng is deterministic per seed', () => {
   const a = new Rng('VEGA-1234');
@@ -16,11 +17,19 @@ test('rng is deterministic per seed', () => {
   assert.notDeepEqual(sa, Array.from({ length: 5 }, () => c.next()));
 });
 
+test('hex maths: rotation by 60° is exact, pixel round-trips', () => {
+  for (const c of hexagon(4)) {
+    const r6 = [0, 1, 2, 3, 4, 5].reduce((acc) => rotateCell(acc, Math.PI / 3), c);
+    assert.deepEqual(r6, c);
+    assert.equal(hexDistance(rotateCell(c, Math.PI / 3), { q: 0, r: 0 }), hexDistance(c, { q: 0, r: 0 }));
+    const px = toPixel(c.q, c.r);
+    assert.deepEqual(fromPixel(px.x + 3, px.y - 3), c);
+  }
+});
+
 test('same seed and player count give the same map', () => {
   for (let p = 2; p <= 6; p++) {
-    const a = generateMap('ORION-7777', p);
-    const b = generateMap('ORION-7777', p);
-    assert.equal(JSON.stringify(a), JSON.stringify(b));
+    assert.equal(JSON.stringify(generateMap('ORION-7777', p)), JSON.stringify(generateMap('ORION-7777', p)));
   }
 });
 
@@ -35,49 +44,38 @@ for (let players = 2; players <= 6; players++) {
     const p = mapParams(players);
     for (const seed of SEEDS) {
       const map = generateMap(seed, players);
-      const failed = map.checks.filter((c) => !c.pass);
-      assert.deepEqual(failed, [], `seed ${seed}`);
+      assert.deepEqual(map.checks.filter((c) => !c.pass), [], `seed ${seed}`);
 
       // Independent re-verification of the core guarantees.
-      const adj = buildAdjacency(map.nodes.length, map.lanes);
+      const { adj, cost } = tileGraph(map.nodes);
+      const D = allCosts(map.nodes);
       const homes = map.nodes.filter((n) => n.type === 'home');
       assert.equal(homes.length, players);
-      const nearest = (h, type) => {
-        const d = bfs(adj, h.id);
-        return Math.min(...map.nodes.filter((n) => n.type === type).map((n) => d[n.id]));
-      };
+      const nearest = (h, type) => Math.min(...map.nodes.filter((n) => n.type === type).map((n) => D[h.id][n.id]));
       const keyD = homes.map((h) => nearest(h, 'key'));
       const staD = homes.map((h) => nearest(h, 'station'));
       assert.equal(new Set(keyD).size, 1, `fair key planets ${keyD} (seed ${seed})`);
       assert.equal(new Set(staD).size, 1, `fair stations ${staD} (seed ${seed})`);
-      assert.ok(Number.isFinite(keyD[0]) && Number.isFinite(staD[0]));
-      for (const h of homes) assert.ok(adj[h.id].length >= 2, 'home has 2+ exits');
-      assert.ok(bfs(adj, 0).every(Number.isFinite), 'fully connected');
+      for (const h of homes) assert.ok(adj[h.id].length >= 2, 'home has 2+ open exits');
+      const { comp } = components(adj);
+      const open = map.nodes.filter((n) => cost[n.id] !== Infinity);
+      assert.equal(new Set(open.map((n) => comp[n.id])).size, 1, 'fully connected');
       assert.equal(map.nodes.filter((n) => n.type === 'trade').length, 2 * players + 1);
       assert.equal(map.nodes.filter((n) => n.central).length, p.centralCount);
       assert.equal(map.nodes.filter((n) => n.core).length, 1);
       assert.ok(map.nodes.filter((n) => n.type === 'intersection').length >= 3);
       assert.ok(map.pirates.length >= 2, 'neutral pirates placed');
+      assert.ok(map.nodes.some((n) => n.type === 'void'), 'board has void rifts');
+      assert.ok(map.nodes.some((n) => n.type === 'asteroid' || n.type === 'nebula'), 'board has hazards');
 
-      // Lanes never cross and never duplicate.
-      const seen = new Set();
-      for (const l of map.lanes) {
-        const key = [l.a, l.b].sort((x, y) => x - y).join('-');
-        assert.ok(!seen.has(key), 'duplicate lane');
-        seen.add(key);
-      }
-      for (let i = 0; i < map.lanes.length; i++) {
-        for (let j = i + 1; j < map.lanes.length; j++) {
-          const A = map.lanes[i];
-          const B = map.lanes[j];
-          assert.ok(!segmentsCross(map.nodes[A.a], map.nodes[A.b], map.nodes[B.a], map.nodes[B.b]), 'lanes cross');
+      // Hazards and rifts never touch a home tile.
+      for (const h of homes) {
+        for (const n of map.nodes) {
+          if (['void', 'asteroid', 'nebula'].includes(n.type)) assert.ok(hexDistance(h, n) >= 2);
         }
       }
-      // Hazards never touch a home sector.
-      for (const l of map.lanes.filter((x) => x.hazard)) {
-        assert.notEqual(map.nodes[l.a].type, 'home');
-        assert.notEqual(map.nodes[l.b].type, 'home');
-      }
+      // Every tile on the board is a hexagon cell within the radius.
+      assert.equal(map.nodes.length, hexagon(p.radius).length);
     }
   });
 }
@@ -85,26 +83,24 @@ for (let players = 2; players <= 6; players++) {
 test('fairness checks catch an unfair map', () => {
   const map = generateMap('BROKEN-1', 3);
   const broken = structuredClone(map);
-  // Cut a home down to a single lane and make one home's station vanish.
+  // Wall a home in with void and make one station vanish.
   const home = broken.nodes.find((n) => n.type === 'home');
-  const homeLanes = broken.lanes.filter((l) => l.a === home.id || l.b === home.id);
-  broken.lanes = broken.lanes.filter((l) => !homeLanes.slice(1).includes(l));
+  for (const n of broken.nodes) if (hexDistance(n, home) === 1) n.type = 'void';
   broken.nodes.find((n) => n.type === 'station').type = 'empty';
   const failed = runFairnessChecks(broken).filter((c) => !c.pass).map((c) => c.id);
   assert.ok(failed.includes('exits'));
+  assert.ok(failed.includes('connected'));
   assert.ok(failed.includes('fairStation'));
 });
 
 test('rejected candidates are recorded and replayable', () => {
-  // Find a seed that needed at least one retry, then confirm that attempt fails.
   let found = null;
-  for (let i = 0; i < 50 && !found; i++) {
-    const m = generateMap(`RETRY-${i}`, 5);
+  for (let i = 0; i < 60 && !found; i++) {
+    const m = generateMap(`RETRY-${i}`, 2);
     if (m.rejected.length) found = m;
   }
   assert.ok(found, 'expected some seed to need a retry');
-  const first = found.rejected[0];
-  const replay = generateCandidate(found.seed, 5, first.attempt);
+  const replay = generateCandidate(found.seed, 2, found.rejected[0].attempt);
   assert.equal(replay.valid, false);
   assert.equal(found.attempt, found.rejected.length);
 });

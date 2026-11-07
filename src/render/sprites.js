@@ -2,6 +2,8 @@
 // separately at full device resolution. Sprites are built once into small
 // offscreen canvases and drawn scaled by whole numbers with smoothing off.
 
+import { TILE_W, TILE_H } from '../map/hex.js';
+
 export const PLAYER_COLORS = [
   { name: 'Crimson', main: '#e5484d', dark: '#8e1f24', light: '#ff9592' },
   { name: 'Azure', main: '#3b9eff', dark: '#1a4f8c', light: '#9ccbff' },
@@ -295,6 +297,119 @@ const TRADE_ROWS = [
 
 const STAR_ROWS = ['..w..', '.wyw.', 'wyyyw', '.wyw.', '..w..'];
 
+// ---------------------------------------------------------------- hex tiles
+//
+// Tile mask = the Voronoi cell of the hex lattice (28 px apart in a row,
+// rows 24 px apart, offset 14), so tiles tessellate pixel-perfectly.
+
+
+const LATTICE = [[28, 0], [-28, 0], [14, 24], [-14, 24], [14, -24], [-14, -24]];
+let maskCache = null;
+
+/** mask[y][x] = true if the pixel belongs to the tile centred at (14, 16). */
+export function hexMask() {
+  if (maskCache) return maskCache;
+  maskCache = [];
+  for (let y = 0; y < TILE_H; y++) {
+    const row = [];
+    for (let x = 0; x < TILE_W; x++) {
+      const dx = x + 0.5 - TILE_W / 2;
+      const dy = y + 0.5 - TILE_H / 2;
+      const d0 = dx * dx + dy * dy;
+      row.push(LATTICE.every(([lx, ly]) => d0 < (dx - lx) ** 2 + (dy - ly) ** 2));
+    }
+    maskCache.push(row);
+  }
+  return maskCache;
+}
+
+const inMask = (m, x, y) => y >= 0 && y < TILE_H && x >= 0 && x < TILE_W && m[y][x];
+
+function hash2(x, y, s) {
+  const v = Math.sin(x * 127.1 + y * 311.7 + s * 74.7) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+function mix(a, b, t) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  return `#${pa.map((v, i) => Math.round(v + (pb[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+}
+
+const TILE_STYLE = {
+  empty: { base: '#0b1330', alt: '#0e1838', edge: '#1b2752' },
+  feature: { base: '#0f1a40', alt: '#121f4a', edge: '#24336a' },
+  void: { base: '#020208', alt: '#06040f', edge: '#0d0a1c' },
+  asteroid: { base: '#0b1330', alt: '#0e1838', edge: '#1b2752' },
+  nebula: { base: '#24124a', alt: '#32195f', edge: '#45297a' },
+};
+
+/** A hex tile background: terrain texture plus a 1-px bottom/right edge. */
+function hexTile(kind, variant, tint = null) {
+  const m = hexMask();
+  const st = TILE_STYLE[kind];
+  const c = makeCanvas(TILE_W, TILE_H);
+  const ctx = c.getContext('2d');
+  const put = (x, y, col) => {
+    ctx.fillStyle = col;
+    ctx.fillRect(x, y, 1, 1);
+  };
+  for (let y = 0; y < TILE_H; y++) {
+    for (let x = 0; x < TILE_W; x++) {
+      if (!m[y][x]) continue;
+      const edge = !inMask(m, x + 1, y) || !inMask(m, x, y + 1) || !inMask(m, x + 1, y + 1);
+      const n = hash2(x, y, variant);
+      let col = n < 0.5 ? st.base : st.alt;
+      if (kind === 'nebula') {
+        const d = Math.hypot(x - 14, (y - 16) * 0.9) / 15;
+        const v = 1 - d + (n - 0.5) * 0.5;
+        col = v > 0.55 ? '#5b3a99' : v > 0.3 ? '#45297a' : v > 0.1 ? st.alt : st.base;
+      }
+      if (kind === 'void' && n > 0.97) col = '#2a1650';
+      if ((kind === 'empty' || kind === 'asteroid' || kind === 'feature') && n > 0.985) col = '#8b97c2';
+      if (tint) col = mix(col, tint, n < 0.5 ? 0.42 : 0.34);
+      put(x, y, edge ? st.edge : col);
+    }
+  }
+  if (kind === 'asteroid') {
+    // A few pixel rocks.
+    const rocks = [[8, 11, 3], [17, 9, 2], [12, 19, 4], [20, 18, 2], [7, 21, 2]];
+    for (const [rx, ry, size] of rocks) {
+      const ox = Math.round((hash2(rx, ry, variant) - 0.5) * 3);
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (size > 2 && (x === 0 || x === size - 1) && (y === 0 || y === size - 1)) continue;
+          put(rx + x + ox, ry + y, y === 0 || x === 0 ? '#b8875a' : y === size - 1 ? '#5a4030' : '#8a6a48');
+        }
+      }
+    }
+  }
+  if (kind === 'void') {
+    // Faint rift crack.
+    for (let i = 0; i < 9; i++) put(9 + i + Math.round(Math.sin(i + variant) * 1.5), 12 + i, '#1a0f33');
+  }
+  return c;
+}
+
+/** Hex outline (both sides of each edge) in one colour, for selection rings. */
+function hexOutline(color, thick = 1) {
+  const m = hexMask();
+  const c = makeCanvas(TILE_W, TILE_H);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = color;
+  for (let y = 0; y < TILE_H; y++) {
+    for (let x = 0; x < TILE_W; x++) {
+      if (!m[y][x]) continue;
+      let edge = false;
+      for (let d = 1; d <= thick && !edge; d++) {
+        edge = [[d, 0], [-d, 0], [0, d], [0, -d]].some(([dx, dy]) => !inMask(m, x + dx, y + dy));
+      }
+      if (edge) ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  return c;
+}
+
 const cache = new Map();
 
 /** Get (and cache) a sprite canvas by key. */
@@ -336,6 +451,18 @@ export function sprite(key) {
     case 'hidden':
       c = nebula(16);
       break;
+    case 'tile': {
+      // tile:<kind>:<variant>[:<tint>]
+      const [, k, v, tint] = key.split(':');
+      c = hexTile(k, Number(v), tint ? `#${tint}` : null);
+      break;
+    }
+    case 'outline': {
+      // outline:<hex colour without #>:<thickness>
+      const [, col, thick] = key.split(':');
+      c = hexOutline(`#${col}`, Number(thick || 1));
+      break;
+    }
     case 'ship': {
       // ship:<type>:<playerIndex|pirate>
       const [, type, owner] = key.split(':');
@@ -352,12 +479,23 @@ export function sprite(key) {
   return c;
 }
 
-/** Sprite key for a map node. */
-export function nodeSpriteKey(node, { revealHidden = false } = {}) {
+const TERRAIN = new Set(['empty', 'void', 'asteroid', 'nebula']);
+
+/** Sprite key for a tile's background. */
+export function tileSpriteKey(node) {
+  const variant = (node.q * 7 + node.r * 13 + 100) % 4;
+  if (node.type === 'home') return `tile:feature:${variant}:${PLAYER_COLORS[node.homeOf].dark.slice(1)}`;
+  if (TERRAIN.has(node.type)) return `tile:${node.type}:${variant}`;
+  return `tile:feature:${variant}`;
+}
+
+/** Sprite key for the feature drawn on a tile, or null for plain terrain. */
+export function featureSpriteKey(node, { revealHidden = false } = {}) {
   if (node.type === 'home') return `home:${node.homeOf}`;
   if (node.core) return 'core';
-  if (node.type === 'key') return `key:${node.id % 4}`;
-  if (node.hidden && !revealHidden) return 'hidden';
+  if (node.type === 'key') return `key:${(node.q * 3 + node.r * 5 + 40) % 4}`;
+  if (node.hidden) return revealHidden ? null : 'hidden';
+  if (TERRAIN.has(node.type)) return null;
   return node.type;
 }
 

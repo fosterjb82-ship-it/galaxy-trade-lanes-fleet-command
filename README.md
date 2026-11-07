@@ -23,14 +23,33 @@ There is no build step: plain ES modules, no dependencies.
 
 ### Stage 1: Map Lab
 
-- **Seeds:** type any seed (or press *Random seed*) and choose 2–6 players. The URL updates to `#seed=…&players=…`, so *Copy share link* reproduces the same map exactly.
-- **Generation** follows the six steps in DESIGN.md. Nodes are scattered with minimum spacing in one player's wedge, then mirrored into every other wedge with a small random jitter. Maps look random but come out close to symmetric, so few candidates fail.
-- **Fairness checks:** fully connected; every home has 2+ exits; every home is the same number of jumps from its nearest key planet and from its nearest station; the galactic core is within ±1 jump of being equidistant from all homes (2–3 contested central planets at 5–6 players); 2 × players + 1 trade nodes; choke-point intersections sit on at least 1.5× the average share of shortest paths. A failed candidate is thrown away and the next attempt is generated from the same seed. The Map Lab lists the rejected attempts and lets you open each one to see which check failed.
-- **Extras:** hazard lanes (asteroid fields, nebulas; never on a home's lanes), hidden nodes (derelict, pirate nest, bonus), and neutral pirate fleets placed 2+ jumps from every home.
+- **Hex board:** every space is a hex tile. Ships move to any tile that shares an edge with theirs. Tile types:
+  - home sector, key planet, space station, trade node, lane intersection (choke point), open space;
+  - **asteroid field**: costs 2 movement to enter;
+  - **nebula**: 1 damage to a ship entering it;
+  - **void rift**: impassable.
+- **Seeds:** type any seed (or press *Random seed*) and choose 2–6 players. The URL updates to `#seed=…&players=…`, so *Copy share link* reproduces the same board exactly.
+- **Generation** follows the six steps in DESIGN.md, adapted to hexes:
+  - Homes sit on the rim, with the galactic core in the centre. At 5–6 players, 1–2 more contested key planets sit next to the core.
+  - Terrain is scattered in one player's wedge and copied into every wedge: exact hex rotations at 2, 3 and 6 players, the board's two mirror reflections at 4, and snapped 72° rotations at 5.
+  - Pockets cut off from the rest of the board become void.
+- **Fairness checks**, measured in movement cost:
+  - the board is fully connected;
+  - every home has 2+ open exits;
+  - every home is equally far from its nearest key planet and its nearest station;
+  - the core is within ±1 move of being equidistant from every home;
+  - there are 2 × players + 1 trade nodes;
+  - choke-point intersections carry at least 1.5× the average share of shortest paths.
 
-## Rendering
-
-Pixel art is used for images only: sprites and the starfield are drawn at whole-number scale with smoothing off. Text, numbers, lanes and rings are drawn at native device resolution (canvas sized by `devicePixelRatio`, plus HTML for panels), so they stay sharp on high-DPI screens.
+  A candidate that fails any check is discarded. The Map Lab lists rejected attempts and lets you open each one to see the failure.
+- **Zoom and details:** zoom with *+ / −* (also the keyboard, or the scroll wheel). Zoom always steps between whole-number pixel scales so the art stays sharp. *Fit* (or `0`) shows the whole board, and dragging pans. Click any tile to open its details pane, which shows:
+  - its effect;
+  - movement cost;
+  - Command Points and VP value;
+  - control;
+  - moves from each home;
+  - any hidden contents or pirates on it;
+  - its neighbouring tiles (click one to open it).
 
 ## Layout
 
@@ -38,9 +57,10 @@ Pixel art is used for images only: sprites and the starfield are drawn at whole-
 src/rng.js              seeded RNG (mulberry32) + readable seeds
 src/map/generator.js    map generation steps 1–6
 src/map/fairness.js     independent fairness checks
-src/map/graph.js        BFS, components, betweenness, geometry
-src/render/sprites.js   pixel-art sprites (procedural + hand-drawn)
-src/render/board.js     canvas board: pan/zoom, hit testing, crisp text
+src/map/hex.js          axial hex maths, rotations, pixel <-> tile
+src/map/graph.js        BFS, Dijkstra, components, betweenness
+src/render/sprites.js   pixel-art hex tiles and sprites (procedural + hand-drawn)
+src/render/board.js     canvas hex board: integer zoom, pan, hit testing, crisp text
 src/ui/                 screens (Map Lab)
 tests/                  node --test suites
 ```
