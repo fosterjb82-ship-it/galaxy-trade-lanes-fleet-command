@@ -1,4 +1,4 @@
-// Card face for the hand. Pixel-art icon; all text crisp HTML.
+// Card faces: an illustration (high-res art) above crisp HTML text.
 
 import { CARDS, CARD_TYPE } from '../game/cards.js';
 import { SHIPS } from '../game/ships.js';
@@ -19,14 +19,18 @@ function weaponText(w) {
   return `${w.type[0].toUpperCase()}${w.type.slice(1)} ${w.damage}${w.range ? ` · r${w.range}` : ''}`;
 }
 
+function typeLabel(def) {
+  return def.upgradeKind ? `${def.upgradeKind} upgrade` : TYPE_NAME[def.type];
+}
+
 /**
+ * A card in the hand.
  * @param {string} defId
  * @param {{ owner?: number, state?: 'playable'|'locked'|'blocked'|'selected', note?: string, onClick?: Function }} o
  */
 export function cardFace(defId, o = {}) {
   const def = CARDS[defId];
   const ship = def.ship ? SHIPS[def.ship] : null;
-  const iconKey = ship ? `ship:${def.ship}:${o.owner ?? 0}` : def.icon;
   return h(`button.card.type-${def.type}.${o.state ?? 'playable'}`, {
     type: 'button',
     title: o.note ?? def.text,
@@ -34,8 +38,8 @@ export function cardFace(defId, o = {}) {
     'aria-pressed': o.state === 'selected' ? 'true' : 'false',
   },
   h('div.card-top', h('span.card-name', def.name), def.cost > 0 && h('span.card-cost', { title: 'Cost to buy' }, def.cost)),
-  h('div.card-art', spriteIcon(iconKey, 44)),
-  h('div.card-type', TYPE_NAME[def.type]),
+  h('div.card-art', spriteIcon(`cardart:${defId}:${o.owner ?? ''}`, 110)),
+  h('div.card-type', typeLabel(def)),
   ship
     ? h('div.card-stats',
       h('span', h('b', ship.speed), 'SPD'),
@@ -44,4 +48,23 @@ export function cardFace(defId, o = {}) {
       h('span', h('b', ship.cp), 'CP'))
     : h('div.card-text', def.text),
   o.note && o.state !== 'playable' && o.state !== 'selected' && h('div.card-note', o.note));
+}
+
+/** A large card for inspecting it on the table. */
+export function cardLarge(defId, { owner = '' } = {}) {
+  const def = CARDS[defId];
+  const ship = def.ship ? SHIPS[def.ship] : null;
+  return h(`div.card-large.type-${def.type}`,
+    h('div.card-top', h('span.card-name', def.name), def.cost > 0 && h('span.card-cost', def.cost)),
+    h('div.card-art', spriteIcon(`cardart:${defId}:${owner}`, 250)),
+    h('div.card-type', typeLabel(def)),
+    h('div.card-text', def.text),
+    ship && h('div.card-stats',
+      h('span', h('b', ship.speed), 'Speed'),
+      h('span', h('b', weaponText(ship.weapon)), 'Weapon'),
+      h('span', h('b', ship.hull), 'Hull'),
+      h('span', h('b', ship.cp), 'CP'),
+      h('span', h('b', ship.slots), 'Slots'),
+      ship.armor > 0 && h('span', h('b', ship.armor), 'Armor')),
+    ship?.special && h('div.card-note.muted', ship.special));
 }

@@ -10,6 +10,9 @@ import { renderShip, SHIP_ASPECT, SHIP_DESIGNS } from './art/ships.js';
 import {
   renderTile, renderStation, renderGate, renderTrade, renderAnomaly, renderIcon, TILE_BOX,
 } from './art/tiles.js';
+import { renderCardArt, renderMissionArt, CARD_ART_ASPECT, MISSION_ART_ASPECT } from './art/scenes.js';
+import { CARDS } from '../game/cards.js';
+import { MISSIONS } from '../game/missions.js';
 
 export const PLAYER_COLORS = [
   { name: 'Crimson', main: '#e5484d', dark: '#8e1f24', light: '#ff9592' },
@@ -22,7 +25,7 @@ export const PLAYER_COLORS = [
 
 export const PIRATE_COLOR = { name: 'Pirates', main: '#d23c3c', dark: '#5a1212', light: '#ff8a7a' };
 
-export { TILE_BOX, SHIP_ASPECT };
+export { TILE_BOX, SHIP_ASPECT, CARD_ART_ASPECT, MISSION_ART_ASPECT };
 export const SHIP_TYPES = SHIP_DESIGNS;
 
 /** Size of each kind of art on the board, in board units (a tile is 28 wide). */
@@ -75,6 +78,15 @@ function build(kind, parts, w, frame) {
       return renderShip(w, parts[1], '#ffffff', 0, { flash: true });
     case 'card':
       return renderIcon(w, parts[1]);
+    case 'cardart': {
+      // cardart:<defId>[:<owner>]
+      const def = CARDS[parts[1]];
+      const owner = parts[2];
+      const color = owner === undefined || owner === '' ? '#6fa8dc' : shipColor(owner);
+      return renderCardArt(w, parts[1], def?.type ?? 'ship', color);
+    }
+    case 'mission':
+      return renderMissionArt(w, parts[1], MISSIONS[parts[1]]?.kind);
     case 'empty':
       return renderTile(w, 'empty', 0);
     default:

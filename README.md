@@ -181,6 +181,17 @@ All artwork is drawn procedurally at the exact device-pixel size it is shown at 
 
 Images are cached by key, size and animation frame. Text, numbers, outlines and effects are drawn as vectors at native resolution.
 
+### The card table, ship details and illustrations
+
+- **Card table:** the Shipyard and the Market Row sit on a table beside the map as illustrated cards. Prices are on gold coins, the market deck shows how many cards are left, and unaffordable cards are dimmed. Clicking a card shows it large with its full text and a **Buy** button.
+- **Always-on economy:** the Shipyard always sells a Credits card (+1) for 2, so the economy never stalls when no credit card comes up in the market.
+- **Every card is illustrated:** each of the 30 cards has its own scene built from the game's art, and so does each of the 18 missions. Illustrations show on the table, in your hand, in the card inspector, in the mission draft, in the sidebar and on mission reveals.
+- **Ship details:** click any ship on the board (or in a tile's ship list or your fleet list). The details pane shows:
+  - large artwork, the owner and a hull bar;
+  - effective speed, weapons, shields and armor (upgrades included), plus CP and other systems;
+  - its status (ion-disabled, already fired), location and trade route;
+  - every upgrade slot, filled with the fitted card or marked empty. On your turn, upgrades in your hand that fit can be fitted from there.
+
 ## Rules decided where the design was silent or didn't fit the hex board
 
 - Control needs ships present (your empty home stays yours). Pirates block control but never hold it.
@@ -201,7 +212,7 @@ src/map/fairness.js     independent fairness checks
 src/map/hex.js          axial hex maths, rotations, pixel <-> tile
 src/map/graph.js        BFS, Dijkstra, components, betweenness
 src/render/sprites.js   art facade: any image by key at an exact pixel size, cached
-src/render/art/         high-res procedural art: planets, ships, tiles, features, icons
+src/render/art/         high-res procedural art: planets, ships, tiles, features, icons, card and mission scenes
 src/render/board.js     canvas hex board: smooth zoom, pan, hit testing, crisp text
 src/game/ships.js       ship stats, CP costs, pirate fleets
 src/game/cards.js       card definitions, starting deck, market deck

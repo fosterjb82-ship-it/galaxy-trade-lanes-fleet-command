@@ -47,6 +47,16 @@ test('buying from the shipyard puts the card in the discard pile', () => {
   cardLocations(g);
 });
 
+test('a Credits card is always for sale for 2 (no station discount)', () => {
+  let g = game();
+  g.players[0].credits = 4;
+  g = act(g, { type: 'buy', player: 0, def: 'credits' });
+  assert.equal(g.players[0].credits, 2);
+  assert.equal(g.cards[g.players[0].discard.at(-1)].def, 'credits');
+  assert.equal(buyPrice(g, 0, 'credits'), 2);
+  cardLocations(g);
+});
+
 test('ships cost 1 less while you control a station', () => {
   let g = game();
   g = deployFighter(g, 0);

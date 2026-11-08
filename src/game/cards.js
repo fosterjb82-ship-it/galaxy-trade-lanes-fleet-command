@@ -14,7 +14,7 @@ export const CARD_TYPE = {
 
 export const CARDS = {
   credits: {
-    name: 'Credits', type: CARD_TYPE.CREDIT, cost: 0, credits: 1, icon: 'card:credit',
+    name: 'Credits', type: CARD_TYPE.CREDIT, cost: 2, credits: 1, icon: 'card:credit',
     text: '+1 credit.',
   },
   move: {

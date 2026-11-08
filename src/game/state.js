@@ -33,8 +33,8 @@ export const END_CHANCE = {
 };
 export const END_ODDS_LABEL = { [1 / 3]: '1 in 3', [1 / 2]: '1 in 2', 1: 'certain' };
 
-/** Ship cards the Shipyard always sells. */
-export const SHIPYARD = ['ship-fighter', 'ship-freighter', 'ship-frigate', 'ship-destroyer'];
+/** Cards always for sale: the four basic ships, plus a Credits card for 2 so the economy never stalls. */
+export const SHIPYARD = ['credits', 'ship-fighter', 'ship-freighter', 'ship-frigate', 'ship-destroyer'];
 
 
 
