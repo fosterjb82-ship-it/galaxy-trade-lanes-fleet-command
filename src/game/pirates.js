@@ -37,6 +37,7 @@ export function piratePhase(state, destroyShip, label) {
         const toTarget = bfs(adj, target.tile);
         const step = adj[pirate.tile].filter((n) => toTarget[n] < toTarget[pirate.tile]).sort((a, b) => toTarget[a] - toTarget[b])[0];
         if (step !== undefined) {
+          (state.fx ??= []).push({ kind: 'move', ship: pirate.id, path: [pirate.tile, step], nebulas: [] });
           pirate.tile = step;
           events.push(`A pirate fleet moves toward ${label(target)}.`);
         }
@@ -47,6 +48,10 @@ export function piratePhase(state, destroyShip, label) {
     const victim = victims.sort((a, b) => (isTrader(b) - isTrader(a)) || a.hull - b.hull)[0];
     const ps = shipStats(state, pirate);
     const r = damageFor(ps.weapons[0], ps, shipStats(state, victim));
+    (state.fx ??= []).push({
+      kind: 'shot', from: pirate.tile, to: victim.tile, weapon: ps.weapons[0].type, damage: r.damage, ion: false,
+      shooter: pirate.id, shooterOwner: 'pirate', target: victim.id,
+    });
     victim.hull -= r.damage;
     events.push(`Pirates attack ${label(victim)} for ${r.damage}.`);
     if (victim.hull <= 0) {

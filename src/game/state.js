@@ -163,6 +163,11 @@ function withRng(state, fn) {
   return out;
 }
 
+/** Record a visual effect for the UI to play back (moves, shots, explosions…). */
+export function fx(state, effect) {
+  (state.fx ??= []).push(effect);
+}
+
 function log(state, text) {
   state.log.push({ round: state.round, text });
 }
@@ -310,6 +315,7 @@ function startTurn(state) {
     }
     if (heal > 0) {
       ship.hull += heal;
+      fx(state, { kind: 'repair', ship: ship.id, tile: ship.tile, amount: heal, start: true });
       events.push(`${shipDef(ship).name} repaired ${heal} hull ${where}.`);
     }
   }
@@ -317,6 +323,7 @@ function startTurn(state) {
   for (const ship of shipsOf(state, p.id)) {
     if (shipStats(state, ship).repairDrones && ship.hull < maxHull(ship)) {
       ship.hull += 1;
+      fx(state, { kind: 'repair', ship: ship.id, tile: ship.tile, amount: 1, start: true });
       events.push(`Repair drones fix 1 hull on a ${shipDef(ship).name.toLowerCase()}.`);
     }
   }
@@ -330,6 +337,7 @@ function startTurn(state) {
   income += deals;
   if (income) {
     p.credits += income;
+    fx(state, { kind: 'income', tile: p.home, amount: income, owner: p.id, start: true });
     events.push(`Trade income: +${income} credit${income === 1 ? '' : 's'}${deals ? ` (incl. ${deals} from agreements)` : ''}.`);
   }
   // Deep Strike: a ship that ended your last turn in an enemy home and is still there.
@@ -355,6 +363,7 @@ function awardVP(state, pid, n, source) {
 export function destroyShip(state, shipId, { by = null, cause = '' } = {}) {
   const i = state.ships.findIndex((s) => s.id === shipId);
   const [ship] = state.ships.splice(i, 1);
+  fx(state, { kind: 'explode', ship: ship.id, tile: ship.tile, type: ship.type, owner: ship.owner });
   if (ship.owner !== 'pirate') {
     const owner = state.players[ship.owner];
     if (ship.card) owner.discard.push(ship.card);
@@ -488,14 +497,15 @@ function revealHidden(state, ship) {
   if (!node.hidden || node.revealed) return;
   node.revealed = true;
   const p = state.players[ship.owner];
-  const fx = HIDDEN_EFFECT[node.hiddenContent];
+  const eff = HIDDEN_EFFECT[node.hiddenContent];
   if (node.hiddenContent === 'derelict') p.credits += 2;
   if (node.hiddenContent === 'bonus') drawCards(state, p.id, 1);
   if (node.hiddenContent === 'pirateNest') {
     state.ships.push({ id: `s${state.nextId++}`, owner: 'pirate', type: 'pirate', tile: node.id, hull: PIRATE.hull, upgrades: [] });
   }
-  state.lastMove?.events.push(`${fx.title}! ${fx.text}`);
-  log(state, `${p.name} revealed a ${fx.title.toLowerCase()}: ${fx.text}`);
+  fx(state, { kind: 'reveal', tile: node.id, content: node.hiddenContent, spawned: node.hiddenContent === 'pirateNest' ? state.ships.at(-1).id : null });
+  state.lastMove?.events.push(`${eff.title}! ${eff.text}`);
+  log(state, `${p.name} revealed a ${eff.title.toLowerCase()}: ${eff.text}`);
 }
 
 /** Tiles a player's ship can reach with a Move card right now. */
@@ -555,6 +565,7 @@ export function reactionCheck(state, pendingInfo, cardUid) {
 
 /** Enter a tile outside normal movement (retreat): nebula damage applies. */
 function enterTile(state, ship, tile, events) {
+  fx(state, { kind: 'move', ship: ship.id, path: [ship.tile, tile], nebulas: state.map.nodes[tile].type === 'nebula' ? [1] : [] });
   ship.tile = tile;
   if (state.map.nodes[tile].type === 'nebula') {
     ship.hull -= 1;
@@ -572,6 +583,10 @@ function fire(state, shooter, weaponIndex, target, opts, events) {
   const ws = shipStats(state, shooter);
   const weapon = ws.weapons[weaponIndex];
   const report = damageFor(weapon, ws, shipStats(state, target), opts);
+  fx(state, {
+    kind: 'shot', from: shooter.tile, to: target.tile, weapon: weapon.type, damage: report.damage, ion: report.ion,
+    shooter: shooter.id, shooterOwner: shooter.owner, target: target.id,
+  });
   if (report.ion) {
     target.disabled = state.turnNumber;
     events.push(`Ion strike: ${shipLabel(state, target)} is disabled for its next turn.`);
@@ -658,6 +673,7 @@ export function applyAction(prev, action) {
   const handler = HANDLERS[action.type];
   if (!handler) throw new GameError(`Unknown action ${action.type}`);
   state.notices = [];
+  state.fx = [];
   handler(state, action);
   pruneRoutes(state, (t) => log(state, t));
   if (state.phase === 'action') checkMissions(state);
@@ -676,6 +692,7 @@ const HANDLERS = {
     state.ships.push({
       id: `s${state.nextId++}`, owner: player, type: def.ship, tile, hull: SHIPS[def.ship].hull, card, upgrades: [],
     });
+    fx(state, { kind: 'deploy', ship: state.ships.at(-1).id, tile, owner: player });
     log(state, `${p.name} deployed a ${SHIPS[def.ship].name.toLowerCase()} at ${state.map.nodes[tile].name ?? 'open space'}.`);
   },
 
@@ -789,6 +806,7 @@ const HANDLERS = {
     p.played.push(card);
     const nodes = state.map.nodes;
     state.lastMove = { ship: shipId, path: route.path, events: [] };
+    fx(state, { kind: 'move', ship: shipId, path: route.path, nebulas: route.path.map((t, i) => (i > 0 && nodes[t].type === 'nebula' ? i : -1)).filter((i) => i > 0) });
     for (const step of route.path.slice(1)) {
       ship.tile = step;
       if (nodes[step].type === 'nebula') {
@@ -912,6 +930,7 @@ const HANDLERS = {
     if (!def.repair) throw new GameError(`${def.name} is not a repair card.`);
     const heal = Math.min(def.repair, max - ship.hull);
     ship.hull += heal;
+    fx(state, { kind: 'repair', ship: ship.id, tile: ship.tile, amount: heal });
     state.players[player].played.push(card);
     log(state, `${state.players[player].name} repaired a ${shipDef(ship).name.toLowerCase()} (+${heal} hull).`);
   },

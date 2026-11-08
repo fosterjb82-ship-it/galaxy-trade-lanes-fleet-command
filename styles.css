@@ -619,3 +619,57 @@ details.market[open] summary::before { content: '▾ '; }
 .length-row { display: grid; gap: 6px; }
 .length { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
 .length.on { border-color: #2a8fb5; background: rgba(42, 143, 181, 0.1); }
+
+/* ================================================================ motion */
+
+@keyframes deal-in {
+  from { transform: translateY(40px) rotate(-4deg); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes pop-in {
+  from { transform: translateY(10px) scale(0.96); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 209, 102, 0); }
+  50% { box-shadow: 0 0 36px 4px rgba(255, 209, 102, 0.35); }
+}
+@keyframes title-shine {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+@keyframes rise { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+.card.deal { animation: deal-in 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+.overlay.show { animation: fade-in 0.18s ease-out; }
+.overlay.show .dialog { animation: pop-in 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.1); }
+.mode-bar.show { animation: rise 0.18s ease-out; }
+.details.open { transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.05); }
+.ending.ends { animation: glow 2.4s ease-in-out infinite; }
+.ending.ends .ending-title {
+  background: linear-gradient(90deg, #c9971f 20%, #fff6d6 50%, #c9971f 80%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: title-shine 3s linear infinite;
+}
+.mission-reveal { animation: rise 0.35s ease-out both; }
+.mission-reveal:nth-child(3) { animation-delay: 0.12s; }
+.handoff > * { animation: rise 0.3s ease-out both; }
+.handoff > *:nth-child(2) { animation-delay: 0.05s; }
+.handoff > *:nth-child(3) { animation-delay: 0.1s; }
+.handoff > *:nth-child(4) { animation-delay: 0.15s; }
+.handoff > *:nth-child(5) { animation-delay: 0.2s; }
+.order-chip.now { transition: background 0.3s, box-shadow 0.3s; }
+button:active:not(:disabled) { transform: translateY(1px); }
+.end-turn:not(:disabled):hover { box-shadow: 0 0 18px rgba(255, 209, 102, 0.25); }
+
+.anim-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; }
+
+/* Animations off (toggle) or reduced motion requested: keep everything still. */
+body.still *, body.still *::before, body.still *::after { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

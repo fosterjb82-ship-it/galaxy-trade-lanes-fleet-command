@@ -149,6 +149,26 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - Players are ranked on VP, then most key planets controlled, then most ships on the board.
   - The results show each player's VP from planets, trade, kills and missions.
 
+### Art and animation polish
+
+- **Ambient motion** (the board redraws only about 8 times a second for it):
+  - Planets turn: continents and polar caps drift across rocky worlds, and a storm rotates on the gas-giant core.
+  - Station lights chase around the ring, jump gates turn and pulse, and trade beacons blink.
+  - Nebulas shimmer, hidden tiles churn, and void rifts sparkle.
+  - Stars twinkle, ship engines flicker, and ships hover by a pixel.
+- **Event animations:**
+  - The engine records each action's visual events (`state.fx`); `src/render/fx.js` plays them back in order.
+  - Ships fly along their path, and Retreat and pirate moves animate too.
+  - Weapons: laser beams, cannon shells with tracers, arcing missiles with smoke trails, and ion lightning.
+  - Hits show impact sparks, a white flash and a floating damage number.
+  - Destroyed ships explode in pixel debris with screen shake; their sprite stays until the explosion.
+  - Deploys warp in. Repairs, hidden-tile reveals and trade income each have their own effect.
+  - Dialogs (combat report, mission reveal, round summary) wait until the effects finish.
+  - Start-of-turn repairs and income play once the next player reveals their hand.
+- **Interface motion:** cards deal into your hand, dialogs and handoff screens rise in, and the Imperial Ceasefire banner shines.
+- **Rendering rules:** every effect is pixel art on the whole-pixel grid, and numbers stay as sharp text. Screen shake moves by whole art pixels so the grid never blurs.
+- **Toggle:** an *Animations* switch in the top bar turns everything off. It defaults to off when the system asks for reduced motion.
+
 ## Rules decided where the design was silent or didn't fit the hex board
 
 - Control needs ships present (your empty home stays yours). Pirates block control but never hold it.
@@ -179,6 +199,7 @@ src/game/trade.js       trade routes, blockades, agreements
 src/game/missions.js    the 18 secret missions and their progress
 src/game/pirates.js     end-of-round pirate phase
 src/render/units.js     ships, control outlines and deploy targets on the board
+src/render/fx.js        effects player: moves, shots, explosions, warp-ins, floating numbers
 src/ui/                 screens: setup, game, Map Lab; cards; details pane
 tests/                  node --test suites
 ```

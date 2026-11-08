@@ -12,6 +12,20 @@ import { Rng } from '../rng.js';
 const FONT = '"Inter", "Segoe UI", system-ui, -apple-system, sans-serif';
 const MIN_SCALE = 1;
 const MAX_SCALE = 14;
+const TICK_MS = 125; // ambient animation steps 8 times a second
+
+/** Animations are on unless the viewer asked for reduced motion (or turned them off). */
+export function animationsEnabled() {
+  try {
+    const saved = localStorage.getItem('fleetcommand.animations');
+    if (saved !== null) return saved === 'on';
+  } catch { /* storage unavailable */ }
+  return !(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+}
+
+export function setAnimationsEnabled(on) {
+  try { localStorage.setItem('fleetcommand.animations', on ? 'on' : 'off'); } catch { /* ignore */ }
+}
 
 export class Board {
   /** @param {HTMLCanvasElement} canvas */
@@ -29,11 +43,25 @@ export class Board {
     this.dirty = true;
     this.stars = [];
     this.index = new Map();
+    this.animate = animationsEnabled();
+    this.tick = 0; // ambient frame counter
+    this.now = performance.now();
+    this.busy = []; // fn(now) -> true while an effect needs full-rate frames
+    this.shake = { until: 0, power: 0 };
 
     new ResizeObserver(() => this.resize()).observe(canvas);
     this.resize();
     this.bindInput();
-    const loop = () => {
+    const loop = (now) => {
+      this.now = now;
+      if (this.animate) {
+        const tick = Math.floor(now / TICK_MS);
+        if (tick !== this.tick) {
+          this.tick = tick;
+          this.dirty = true;
+        }
+        if (this.busy.some((fn) => fn(now)) || now < this.shake.until) this.dirty = true;
+      }
       if (this.dirty) {
         this.dirty = false;
         this.draw();
@@ -65,6 +93,7 @@ export class Board {
       y: rng.next(),
       size: rng.chance(0.12) ? 2 : 1,
       tone: rng.pick(['#2a3356', '#3a4466', '#56628c', '#8b97c2']),
+      twinkle: rng.chance(0.18) ? rng.int(1, 22) : 0,
     }));
     this.invalidate();
   }
@@ -116,10 +145,35 @@ export class Board {
 
   /** Board origin on screen, snapped to whole device pixels. */
   origin() {
+    let sx = 0;
+    let sy = 0;
+    if (this.animate && this.now < this.shake.until) {
+      // Shake in whole art pixels so the pixel grid stays crisp.
+      const p = this.shake.power;
+      sx = Math.round((Math.random() * 2 - 1) * p) * this.scale;
+      sy = Math.round((Math.random() * 2 - 1) * p) * this.scale;
+    }
     return {
-      x: Math.round(this.canvas.width / 2 - this.center.x * this.scale),
-      y: Math.round(this.canvas.height / 2 - this.center.y * this.scale),
+      x: Math.round(this.canvas.width / 2 - this.center.x * this.scale) + sx,
+      y: Math.round(this.canvas.height / 2 - this.center.y * this.scale) + sy,
     };
+  }
+
+  /** Brief screen shake, `power` in art pixels. */
+  shakeFor(ms, power = 1) {
+    if (!this.animate) return;
+    this.shake = { until: this.now + ms, power };
+    this.invalidate();
+  }
+
+  /** Ambient frame counter (0 when animations are off). */
+  frame() {
+    return this.animate ? this.tick : 0;
+  }
+
+  setAnimate(on) {
+    this.animate = on;
+    this.invalidate();
   }
 
   toScreen(x, y) {
@@ -307,7 +361,8 @@ export class Board {
 
     // Distant starfield (screen space, pixel art).
     for (const st of this.stars) {
-      ctx.fillStyle = st.tone;
+      // A few stars twinkle.
+      ctx.fillStyle = st.twinkle && this.animate && (this.frame() + st.twinkle) % 23 < 2 ? '#ffffff' : st.tone;
       const x = Math.floor((st.x * W) / starPx) * starPx;
       const y = Math.floor((st.y * H) / starPx) * starPx;
       ctx.fillRect(x, y, st.size * starPx, st.size * starPx);
@@ -319,7 +374,8 @@ export class Board {
       return p.x > -TILE_W * S && p.x < W + TILE_W * S && p.y > -TILE_H * S && p.y < H + TILE_H * S;
     };
     const shown = map.nodes.filter(visible);
-    for (const n of shown) this.blit(sprite(tileSpriteKey(n)), n.x - TILE_W / 2, n.y - TILE_H / 2);
+    const tick = this.frame();
+    for (const n of shown) this.blit(sprite(tileSpriteKey(n, tick)), n.x - TILE_W / 2, n.y - TILE_H / 2);
 
     // Home outlines in player colour.
     for (const n of shown) {
@@ -332,7 +388,7 @@ export class Board {
 
     // Features.
     for (const n of shown) {
-      const k = featureSpriteKey(n, { revealHidden: this.options.revealHidden });
+      const k = featureSpriteKey(n, { revealHidden: this.options.revealHidden, tick });
       if (k) this.blitCentered(sprite(k), n.x, n.y - (this.options.showLabels && n.name && S >= 3 ? 2 : 0));
     }
 

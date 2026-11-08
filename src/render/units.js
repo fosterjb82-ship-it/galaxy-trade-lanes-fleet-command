@@ -9,11 +9,23 @@ import { controlMap } from '../game/state.js';
 // Ship slots on a tile, in art pixels from the tile centre.
 const SLOTS = [[-7, -6], [7, -6], [-7, 7], [7, 7]];
 
+/** Where a ship sits on its tile (art-pixel offset from the tile centre). */
+export function slotOffset(state, ship) {
+  const here = state.ships.filter((s) => s.tile === ship.tile);
+  if (here.length === 1) return [0, 6];
+  const i = Math.min(here.indexOf(ship), SLOTS.length - 1);
+  return SLOTS[Math.max(0, i)];
+}
+
+const idNum = (id) => Number(String(id).replace(/\D/g, '')) || 0;
+
 export function unitLayer(getView) {
   return (board) => {
     const view = getView();
     if (!view?.state) return;
-    const { state, targets, selectedShip, labels, path } = view;
+    const { state, targets, selectedShip, labels, path, fx } = view;
+    const now = board.now;
+    const tick = board.frame();
     const map = state.map;
     const S = board.scale;
     const cssTile = (TILE_W * S) / board.dpr;
@@ -79,10 +91,25 @@ export function unitLayer(getView) {
       const n = map.nodes[tile];
       const shown = ships.length > SLOTS.length ? ships.slice(0, SLOTS.length - 1) : ships;
       shown.forEach((ship, i) => {
-        const [ox, oy] = ships.length === 1 ? [0, 6] : SLOTS[i];
-        const img = sprite(`ship:${shipSprite(ship)}:${ship.owner === 'pirate' ? 'pirate' : ship.owner}`);
-        // Face toward the centre of the board.
-        board.blitCentered(img, n.x + ox, n.y + oy, { flip: n.x > 0 });
+        if (fx?.hidden(ship.id, now)) return; // still warping in
+        let [ox, oy] = ships.length === 1 ? [0, 6] : SLOTS[i];
+        const owner = ship.owner === 'pirate' ? 'pirate' : ship.owner;
+        // Engine flicker, and a gentle 1-pixel hover out of step between ships.
+        const img = sprite(`ship:${shipSprite(ship)}:${owner}@${(tick + idNum(ship.id)) % 2}`);
+        let flip = n.x > 0; // face toward the centre of the board
+        const moving = fx?.position(ship.id, now);
+        if (moving) {
+          // In flight: drawn at the effect's position, facing its heading.
+          const mx = Math.round(moving.x);
+          const my = Math.round(moving.y);
+          if (moving.dx) flip = moving.dx < 0;
+          board.blitCentered(img, mx, my, { flip });
+          if (fx.flashing(ship.id, now)) board.blitCentered(sprite(`flash:${shipSprite(ship)}`), mx, my, { flip });
+          return;
+        }
+        if (Math.floor((tick + idNum(ship.id) * 3) / 8) % 2) oy -= 1;
+        board.blitCentered(img, n.x + ox, n.y + oy, { flip });
+        if (fx?.flashing(ship.id, now)) board.blitCentered(sprite(`flash:${shipSprite(ship)}`), n.x + ox, n.y + oy, { flip });
         if (ship.id === selectedShip) {
           const p = board.toScreen(n.x + ox, n.y + oy);
           board.ring(p.x, p.y, 8 * S, '#ffffff', 1.5);

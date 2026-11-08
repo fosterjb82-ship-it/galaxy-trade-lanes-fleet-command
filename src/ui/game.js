@@ -1,7 +1,8 @@
 // Game screen: board, hand, shipyard and hot-seat turn flow.
 
 import { allCosts } from '../map/generator.js';
-import { Board } from '../render/board.js';
+import { Board, setAnimationsEnabled } from '../render/board.js';
+import { FxPlayer } from '../render/fx.js';
 import { unitLayer } from '../render/units.js';
 import { PLAYER_COLORS } from '../render/sprites.js';
 import { CARDS, CARD_TYPE, cardDef } from '../game/cards.js';
@@ -21,6 +22,13 @@ import { cardFace } from './card.js';
 import { tileDetails, tileTitle } from './details.js';
 import { loadGame, saveGame, clearGame } from './storage.js';
 
+const board0Animate = () => {
+  try {
+    const v = localStorage.getItem('fleetcommand.animations');
+    if (v !== null) return v === 'on';
+  } catch { /* ignore */ }
+  return !(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+};
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const CP_LABEL = { home: 'Home sector', key: 'Key planet', station: 'Station' };
 
@@ -47,6 +55,11 @@ export function mountGame(root) {
     h('div.brand', h('h1', 'Fleet Command'), h('span.stage', state.settings?.length === 'quick' ? 'Quick game' : 'Hot-seat prototype')),
     roundLabel, orderChips,
     h('span.spacer'),
+    h('label.anim-toggle', { title: 'Animations and ambient motion' },
+      h('input', {
+        type: 'checkbox', checked: board0Animate(),
+        onchange: (e) => { setAnimationsEnabled(e.target.checked); board.setAnimate(e.target.checked); document.body.classList.toggle('still', !e.target.checked); },
+      }), 'Animations'),
     h('a.button', { href: `#lab&seed=${encodeURIComponent(state.mapSeed)}&players=${state.players.length}` }, 'Map Lab'),
     h('button', {
       onclick: () => {
@@ -74,11 +87,13 @@ export function mountGame(root) {
   root.append(topbar, h('div.main', h('div.play-col', boardWrap, handBar), sidebar), overlay);
 
   const board = new Board(canvas);
+  document.body.classList.toggle('still', !board.animate);
   board.on('zoom', (s) => { zoomLabel.textContent = `${s}×`; });
   board.decorators.push(unitLayer(() => {
     const view = {
       state, targets: [], selectedShip: null, labels: null, path: null,
       routes: state.routes.map((r) => ({ path: r.path, owner: r.owner, blockaded: blockaded(state, r) })),
+      fx: fxp,
     };
     if (['deploy', 'moveShip', 'attackShip', 'repair', 'upgrade'].includes(mode.kind)) view.targets = mode.tiles;
     if (mode.kind === 'attackTarget') {
@@ -100,6 +115,9 @@ export function mountGame(root) {
     }
     return view;
   }));
+  const fxp = new FxPlayer(board);
+  let startFx = [];
+  let seenHand = new Set(); // cards already shown, so only new draws deal in // start-of-turn effects, played once the player reveals their hand
   board.setOptions({ labelFilter: (n) => !state.ships.some((s) => s.tile === n.id) });
   board.setMap(state.map);
 
@@ -115,10 +133,15 @@ export function mountGame(root) {
 
   function dispatch(action) {
     try {
+      const prev = state;
       state = applyAction(state, action);
       saveGame(state);
+      const events = state.fx ?? [];
+      fxp.play(events.filter((e) => !e.start), prev, state);
+      startFx = events.filter((e) => e.start);
+      startFx.prev = prev;
       const missions = state.notices.filter((n) => n.kind === 'mission');
-      if (missions.length) queueMicrotask(() => announce(missions));
+      if (missions.length) fxp.whenIdle(() => announce(missions));
       return true;
     } catch (e) {
       if (!(e instanceof GameError)) throw e;
@@ -213,8 +236,11 @@ export function mountGame(root) {
 
   /** After an attack or move: a defender may need to respond, or show the report. */
   function afterCombatAction() {
-    if (state.pending) return defenderHandoff();
-    if (state.lastCombat) combatReport(state.lastCombat);
+    fxp.whenIdle(() => {
+      if (state.pending) return defenderHandoff();
+      if (state.lastCombat) combatReport(state.lastCombat);
+      return null;
+    });
   }
 
   function chooseShip(card, shipId) {
@@ -224,7 +250,7 @@ export function mountGame(root) {
   board.on('hover', () => { if (mode.kind === 'moveDest') board.invalidate(); });
 
   board.on('click', (tile) => {
-    if (concealed) return;
+    if (concealed || fxp.isBusy()) return;
     if (tile === null) {
       if (mode.kind !== 'idle') return setMode({ kind: 'idle' });
       return closeDetails();
@@ -282,7 +308,7 @@ export function mountGame(root) {
       if (dispatch({ type: 'move', player: state.active, card, ship, tile })) {
         const events = state.lastMove?.events ?? [];
         say(events.length ? events.join(' ') : `Moved to ${tileName(state, tile)} (${route.cost} movement).`);
-        if (state.pending) defenderHandoff();
+        if (state.pending) fxp.whenIdle(defenderHandoff);
         else {
           const s = state.ships.find((x) => x.id === ship);
           if (s && isTrader(s) && state.map.nodes[s.tile].type === 'trade' && !state.routes.some((r) => r.ship === s.id)) {
@@ -404,8 +430,8 @@ export function mountGame(root) {
         render();
         return;
       }
-      if (state.rounds.length !== roundsBefore) roundSummary(state.rounds.at(-1));
-      else handoff();
+      if (state.rounds.length !== roundsBefore) fxp.whenIdle(() => roundSummary(state.rounds.at(-1)));
+      else fxp.whenIdle(handoff);
     };
     renderKeep();
     showOverlay([
@@ -674,13 +700,15 @@ export function mountGame(root) {
     const defender = state.pending.defender;
     if (!dispatch({ type: 'react', player: defender, card, tile, ship })) return;
     const result = state.lastCombat ?? { events: [`${state.players[defender].name} lets the ship pass.`] };
-    // Hand back to the attacker with the public result.
-    combatReport(result, () => handoff());
+    // Hand back to the attacker with the public result, after the effects.
+    hideOverlay();
+    fxp.whenIdle(() => combatReport(result, () => handoff()));
   }
 
   function handoff() {
     if (state.phase === 'over') return finalScreen();
     concealed = true;
+    seenHand = new Set(); // the next player's whole hand deals in on reveal
     render();
     const p = me();
     const c = PLAYER_COLORS[p.id];
@@ -696,6 +724,10 @@ export function mountGame(root) {
             concealed = false;
             hideOverlay();
             render();
+            if (startFx.length) {
+              fxp.play(startFx, startFx.prev ?? state, state);
+              startFx = [];
+            }
             const ev = state.turnStart?.player === p.id ? state.turnStart.events : [];
             if (ev?.length) say(`Start of turn: ${ev.join(' ')}`);
             if (p.missionOffer.length) missionDialog();
@@ -787,6 +819,7 @@ export function mountGame(root) {
         h('button.primary', { onclick: handoff }, `Show ${p.name}'s hand`)));
       return;
     }
+    let dealt = 0;
     const cards = p.hand.map((uid) => {
       const defId = state.cards[uid].def;
       const def = CARDS[defId];
@@ -815,8 +848,14 @@ export function mountGame(root) {
         note = 'No ship on the board to move';
       }
       if (mode.card === uid) cs = 'selected';
-      return cardFace(defId, { owner: p.id, state: cs, note, onClick: () => clickCard(uid) });
+      const el = cardFace(defId, { owner: p.id, state: cs, note, onClick: () => clickCard(uid) });
+      if (!seenHand.has(uid)) {
+        el.classList.add('deal');
+        el.style.animationDelay = `${dealt++ * 70}ms`;
+      }
+      return el;
     });
+    seenHand = new Set(p.hand);
     handBar.replaceChildren(
       h('div.hand-label',
         h('div', { style: { color: PLAYER_COLORS[p.id].light } }, h('b', p.name)),

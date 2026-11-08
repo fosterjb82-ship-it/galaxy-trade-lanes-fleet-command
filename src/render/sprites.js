@@ -52,13 +52,25 @@ function fromRows(rows, palette) {
   return c;
 }
 
-/** Procedural pixel planet with 3-tone lighting, outline and optional ring. */
-function planet(size, { base, light, dark, ring = null, bands = null, seed = 1 }) {
+export const PLANET_FRAMES = 48;
+
+function hash3(a, b, c) {
+  const v = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+/**
+ * Procedural pixel planet with 3-tone lighting, outline and optional ring.
+ * The surface is mapped onto a sphere and turned by `frame`, so continents
+ * (rocky worlds) or storms (gas giants) drift across the face as it spins.
+ */
+function planet(size, { base, light, dark, ring = null, bands = null, seed = 1, gas = false }, frame = 0) {
   const c = makeCanvas(size, size);
   const ctx = c.getContext('2d');
   const cx = (size - 1) / 2;
   const cy = (size - 1) / 2;
   const r = size / 2 - (ring ? 3.2 : 1.2);
+  const phase = (frame / PLANET_FRAMES) * Math.PI * 2;
   const px = (x, y, col) => {
     ctx.fillStyle = col;
     ctx.fillRect(x, y, 1, 1);
@@ -71,6 +83,7 @@ function planet(size, { base, light, dark, ring = null, bands = null, seed = 1 }
     const d = Math.hypot(dx, dy);
     return d > r + 1.2 && d < r + 3.4 ? (dy < 0 ? -1 : 1) : 0; // -1 back, +1 front
   };
+  const shade = (col, lit) => (lit > 0.55 ? mix(col, '#ffffff', 0.28) : lit > -0.25 ? col : mix(col, dark, 0.55));
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const dx = x - cx;
@@ -84,7 +97,24 @@ function planet(size, { base, light, dark, ring = null, bands = null, seed = 1 }
         }
         const lit = (-dx - dy) / (r * 1.4) + 0.25; // light from top-left
         let col = lit > 0.55 ? light : lit > -0.25 ? base : dark;
-        if (bands && Math.floor((y + seed) / 2) % 3 === 0 && lit > -0.25) col = bands;
+        if (bands) {
+          // Longitude on the sphere, turned by the frame.
+          const z = Math.sqrt(Math.max(0, r * r - dx * dx - dy * dy));
+          const lon = Math.atan2(dx, z) + phase;
+          const u = ((lon / (Math.PI * 2)) % 1 + 1) % 1;
+          const cell = Math.floor(u * 18);
+          const row = Math.floor((dy / r) * 5 + 5);
+          if (gas) {
+            if (Math.floor((y + seed) / 2) % 3 === 0) col = shade(bands, lit);
+            // A storm spot riding the turning surface.
+            const su = (u - 0.3 + 1) % 1;
+            if (su < 0.08 && Math.abs(dy - r * 0.25) < 1.6) col = shade('#f4f7ff', lit);
+          } else {
+            const n = hash3(cell, row, seed) * 0.6 + hash3(cell >> 1, row >> 1, seed + 9) * 0.4;
+            if (n > 0.56) col = shade(bands, lit);
+            if (Math.abs(dy) > r * 0.72 && n > 0.3) col = shade('#e8f4ff', lit); // polar caps
+          }
+        }
         if (rg === 1) col = ring;
         px(x, y, col);
       } else if (rg !== 0) {
@@ -95,8 +125,8 @@ function planet(size, { base, light, dark, ring = null, bands = null, seed = 1 }
   return c;
 }
 
-/** Ring-shaped space station. */
-function station(size, accent) {
+/** Ring-shaped space station; its running lights chase around the ring. */
+function station(size, accent, frame = 0) {
   const c = makeCanvas(size, size);
   const ctx = c.getContext('2d');
   const cx = (size - 1) / 2;
@@ -115,14 +145,17 @@ function station(size, accent) {
       }
     }
   }
-  // Lights on the ring.
-  ctx.fillStyle = accent;
-  for (const [x, y] of [[cx, 1.6], [cx, size - 2.6], [1.6, cx], [size - 2.6, cx]]) ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+  // Lights on the ring: one bright at a time, chasing round.
+  const lights = [[cx, 1.6], [size - 2.6, cx], [cx, size - 2.6], [1.6, cx]];
+  lights.forEach(([x, y], i) => {
+    ctx.fillStyle = i === frame % 4 ? '#ffffff' : accent;
+    ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+  });
   return c;
 }
 
-/** Jump-gate ring for lane intersections. */
-function gate(size) {
+/** Jump-gate ring for lane intersections; the ring turns and the core pulses. */
+function gate(size, frame = 0) {
   const c = makeCanvas(size, size);
   const ctx = c.getContext('2d');
   const cx = (size - 1) / 2;
@@ -131,11 +164,11 @@ function gate(size) {
       const dx = x - cx;
       const dy = y - cx;
       const d = Math.hypot(dx, dy);
-      const ang = Math.atan2(dy, dx);
+      const ang = Math.atan2(dy, dx) + frame * (Math.PI / 16);
       const notch = Math.abs(((ang / (Math.PI / 4)) % 1 + 1) % 1 - 0.5) > 0.38;
       let col = null;
       if (d > 4.4 && d <= 6.6) col = notch ? '#1d3b52' : d > 5.9 ? '#2a6f8f' : '#5fd4ff';
-      else if (d <= 2.2) col = d > 1.4 ? '#2a6f8f' : '#c8f4ff';
+      else if (d <= 2.2) col = d > 1.4 ? '#2a6f8f' : ['#c8f4ff', '#ffffff', '#c8f4ff', '#8fe6ff'][frame % 4];
       if (col) {
         ctx.fillStyle = col;
         ctx.fillRect(x, y, 1, 1);
@@ -145,8 +178,8 @@ function gate(size) {
   return c;
 }
 
-/** Soft purple nebula blob for hidden nodes (deterministic dither). */
-function nebula(size) {
+/** Soft purple nebula blob for hidden nodes; it churns slowly. */
+function nebula(size, frame = 0) {
   const c = makeCanvas(size, size);
   const ctx = c.getContext('2d');
   const cx = (size - 1) / 2;
@@ -157,7 +190,7 @@ function nebula(size) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const d = Math.hypot(x - cx, (y - cx) * 1.15) / (size / 2);
-      const v = 1 - d + (noise(x, y) - 0.5) * 0.45;
+      const v = 1 - d + (noise(x + frame * 3.1, y + frame * 1.7) - 0.5) * 0.45;
       const col = v > 0.62 ? '#c58cff' : v > 0.38 ? '#7d4fc4' : v > 0.18 ? '#45297a' : null;
       if (col) {
         ctx.fillStyle = col;
@@ -448,7 +481,7 @@ const TILE_STYLE = {
 };
 
 /** A hex tile background: terrain texture plus a 1-px bottom/right edge. */
-function hexTile(kind, variant, tint = null) {
+function hexTile(kind, variant, tint = null, frame = 0) {
   const m = hexMask();
   const st = TILE_STYLE[kind];
   const c = makeCanvas(TILE_W, TILE_H);
@@ -462,13 +495,14 @@ function hexTile(kind, variant, tint = null) {
       if (!m[y][x]) continue;
       const edge = !inMask(m, x + 1, y) || !inMask(m, x, y + 1) || !inMask(m, x + 1, y + 1);
       const n = hash2(x, y, variant);
+      const nf = hash2(x, y, variant * 7 + frame); // animated noise
       let col = n < 0.5 ? st.base : st.alt;
       if (kind === 'nebula') {
         const d = Math.hypot(x - 14, (y - 16) * 0.9) / 15;
-        const v = 1 - d + (n - 0.5) * 0.5;
+        const v = 1 - d + (nf - 0.5) * 0.5;
         col = v > 0.55 ? '#5b3a99' : v > 0.3 ? '#45297a' : v > 0.1 ? st.alt : st.base;
       }
-      if (kind === 'void' && n > 0.97) col = '#2a1650';
+      if (kind === 'void' && nf > 0.975) col = '#2a1650';
       if ((kind === 'empty' || kind === 'asteroid' || kind === 'feature') && n > 0.985) col = '#8b97c2';
       if (tint) col = mix(col, tint, n < 0.5 ? 0.42 : 0.34);
       put(x, y, edge ? st.edge : col);
@@ -516,43 +550,45 @@ function hexOutline(color, thick = 1) {
 const cache = new Map();
 
 /** Get (and cache) a sprite canvas by key. */
-export function sprite(key) {
-  if (cache.has(key)) return cache.get(key);
+export function sprite(fullKey) {
+  if (cache.has(fullKey)) return cache.get(fullKey);
+  const [key, frameStr] = fullKey.split('@');
+  const frame = Number(frameStr) || 0;
   const [kind, variant] = key.split(':');
   let c;
   switch (kind) {
     case 'home': {
       const pc = PLAYER_COLORS[Number(variant)];
-      c = planet(22, { base: '#3f7fd6', light: '#7fc0ff', dark: '#1f3f7a', bands: '#4fae6a', ring: pc.main, seed: 2 });
+      c = planet(22, { base: '#3f7fd6', light: '#7fc0ff', dark: '#1f3f7a', bands: '#4fae6a', ring: pc.main, seed: 2 }, frame);
       break;
     }
     case 'core':
-      c = planet(22, { base: '#e0a43a', light: '#ffe08a', dark: '#8a5a12', ring: '#f4f7ff', bands: '#c97a2a', seed: 1 });
+      c = planet(22, { base: '#e0a43a', light: '#ffe08a', dark: '#8a5a12', ring: '#f4f7ff', bands: '#c97a2a', seed: 1, gas: true }, frame);
       break;
     case 'key': {
       const looks = [
         { base: '#4fae6a', light: '#9be3a8', dark: '#22603a', bands: '#3f7fd6' },
         { base: '#c76b4a', light: '#f0a582', dark: '#6b2f1f', bands: '#a0543a' },
-        { base: '#5fb8c9', light: '#b5ecf5', dark: '#2a5f6b', bands: null },
+        { base: '#5fb8c9', light: '#b5ecf5', dark: '#2a5f6b', bands: '#e8f4ff' },
         { base: '#b089d6', light: '#e0c8ff', dark: '#563a7a', bands: '#8d6ab8' },
       ];
-      c = planet(18, { ...looks[Number(variant) % looks.length], seed: Number(variant) });
+      c = planet(18, { ...looks[Number(variant) % looks.length], seed: Number(variant) + 3 }, frame);
       break;
     }
     case 'station':
-      c = station(16, BASE_PALETTE.y);
+      c = station(16, BASE_PALETTE.y, frame);
       break;
     case 'intersection':
-      c = gate(15);
+      c = gate(15, frame);
       break;
     case 'trade':
-      c = fromRows(TRADE_ROWS, BASE_PALETTE);
+      c = fromRows(TRADE_ROWS, frame % 2 ? { ...BASE_PALETTE, y: '#fff2b8' } : BASE_PALETTE);
       break;
     case 'empty':
       c = fromRows(STAR_ROWS, { w: '#7f8bb0', y: '#c8d2f0' });
       break;
     case 'hidden':
-      c = nebula(16);
+      c = nebula(16, frame);
       break;
     case 'card':
       c = fromRows(CARD_ROWS[variant], { ...BASE_PALETTE, r: '#ff5d5d', b: '#1a4f8c', e: '#3ddc84', E: '#176b3a' });
@@ -560,7 +596,7 @@ export function sprite(key) {
     case 'tile': {
       // tile:<kind>:<variant>[:<tint>]
       const [, k, v, tint] = key.split(':');
-      c = hexTile(k, Number(v), tint ? `#${tint}` : null);
+      c = hexTile(k, Number(v), tint ? `#${tint}` : null, frame);
       break;
     }
     case 'outline': {
@@ -575,32 +611,54 @@ export function sprite(key) {
       const col = owner === 'pirate' ? PIRATE_COLOR : PLAYER_COLORS[Number(owner)];
       const pal = { ...BASE_PALETTE, P: col.main };
       if (owner === 'pirate') Object.assign(pal, { g: '#4a4f60', G: '#6b7186', d: '#2b2f3c', c: '#ff5a5a' });
+      if (frame % 2) Object.assign(pal, { o: BASE_PALETTE.y, y: '#fff2b8' }); // engine flicker
       c = fromRows(SHIP_ROWS[type], pal);
+      break;
+    }
+    case 'flash': {
+      // flash:<shipType>: white silhouette of a ship, for hit flashes
+      const rows = SHIP_ROWS[variant] ?? SHIP_ROWS.frigate;
+      const pal = {};
+      for (const ch of new Set(rows.join(''))) if (ch !== '.') pal[ch] = '#ffffff';
+      c = fromRows(rows, pal);
       break;
     }
     default:
       throw new Error(`Unknown sprite ${key}`);
   }
-  cache.set(key, c);
+  cache.set(fullKey, c);
   return c;
 }
 
 const TERRAIN = new Set(['empty', 'void', 'asteroid', 'nebula']);
 
+/**
+ * Ambient animation: `tick` advances 8 times a second. Each kind of art
+ * steps at its own pace; tick 0 everywhere gives still images.
+ */
+const offset = (node) => (node.q * 5 + node.r * 3 + 64) % 16; // de-sync neighbours
+
 /** Sprite key for a tile's background. */
-export function tileSpriteKey(node) {
+export function tileSpriteKey(node, tick = 0) {
   const variant = (node.q * 7 + node.r * 13 + 100) % 4;
   if (node.type === 'home') return `tile:feature:${variant}:${PLAYER_COLORS[node.homeOf].dark.slice(1)}`;
+  if (node.type === 'nebula') return `tile:nebula:${variant}@${Math.floor((tick + offset(node)) / 3) % 4}`;
+  if (node.type === 'void') return `tile:void:${variant}@${Math.floor((tick + offset(node)) / 4) % 6}`;
   if (TERRAIN.has(node.type)) return `tile:${node.type}:${variant}`;
   return `tile:feature:${variant}`;
 }
 
 /** Sprite key for the feature drawn on a tile, or null for plain terrain. */
-export function featureSpriteKey(node, { revealHidden = false } = {}) {
-  if (node.type === 'home') return `home:${node.homeOf}`;
-  if (node.core) return 'core';
-  if (node.type === 'key') return `key:${(node.q * 3 + node.r * 5 + 40) % 4}`;
-  if (node.hidden) return revealHidden ? null : 'hidden';
+export function featureSpriteKey(node, { revealHidden = false, tick = 0 } = {}) {
+  const t = tick + offset(node);
+  const spin = Math.floor(t / 3) % PLANET_FRAMES;
+  if (node.type === 'home') return `home:${node.homeOf}@${spin}`;
+  if (node.core) return `core@${Math.floor(t / 4) % PLANET_FRAMES}`;
+  if (node.type === 'key') return `key:${(node.q * 3 + node.r * 5 + 40) % 4}@${spin}`;
+  if (node.hidden) return revealHidden ? null : `hidden@${Math.floor(t / 3) % 6}`;
+  if (node.type === 'station') return `station@${Math.floor(t / 2) % 4}`;
+  if (node.type === 'intersection') return `intersection@${Math.floor(t / 2) % 32}`;
+  if (node.type === 'trade') return `trade@${Math.floor(t / 4) % 2}`;
   if (TERRAIN.has(node.type)) return null;
   return node.type;
 }
