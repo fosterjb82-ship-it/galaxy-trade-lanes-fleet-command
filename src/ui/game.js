@@ -62,12 +62,10 @@ export function mountGame(root) {
       }), 'Animations'),
     h('a.button', { href: `#lab&seed=${encodeURIComponent(state.mapSeed)}&players=${state.players.length}` }, 'Map Lab'),
     h('button', {
-      onclick: () => {
-        if (confirm('Abandon this game and set up a new one?')) {
-          clearGame();
-          location.hash = '';
-        }
-      },
+      onclick: () => askConfirm('Start a new game?', 'This game will be abandoned and cannot be resumed.', 'Abandon and start new', () => {
+        clearGame();
+        location.hash = '';
+      }),
     }, 'New game'));
 
   const canvas = h('canvas.board');
@@ -394,6 +392,19 @@ export function mountGame(root) {
   function showOverlay(content) {
     overlay.replaceChildren(h('div.dialog', content));
     overlay.classList.add('show');
+  }
+
+  /** In-game confirmation (browser confirm() dialogs are not available everywhere). */
+  function askConfirm(title, text, yesLabel, onYes) {
+    const wasOpen = overlay.classList.contains('show') ? [...overlay.firstChild.childNodes] : null;
+    const back = () => (wasOpen ? showOverlay(wasOpen) : hideOverlay());
+    showOverlay([
+      h('h2', title),
+      h('p.muted', text),
+      h('div.dialog-actions',
+        h('button.big', { onclick: back }, 'Cancel'),
+        h('button.primary.big', { onclick: () => { hideOverlay(); onYes(); } }, yesLabel)),
+    ]);
   }
 
   function hideOverlay() {
@@ -951,7 +962,7 @@ export function mountGame(root) {
               ? h('span.small', active ? h('b', 'Active · +1/turn, 1 VP/round') : h('span.muted', 'Signed (inactive: a route is missing)'))
               : h('span.small.muted', why ?? 'Can offer'),
             ag
-              ? h('button.small-btn', { disabled: concealed, title: `Break it for a one-time ${BREAK_BONUS} credits`, onclick: () => { if (confirm(`Break your agreement with ${o.name}? You gain ${BREAK_BONUS} credits.`)) dispatch({ type: 'breakAgreement', player: p.id, with: o.id }); } }, 'Break')
+              ? h('button.small-btn', { disabled: concealed, title: `Break it for a one-time ${BREAK_BONUS} credits`, onclick: () => askConfirm(`Break your agreement with ${o.name}?`, `You gain ${BREAK_BONUS} credits once. You both lose the +1 credit per turn and 1 VP per round.`, 'Break agreement', () => dispatch({ type: 'breakAgreement', player: p.id, with: o.id })) }, 'Break')
               : h('button.small-btn', { disabled: concealed || Boolean(why), onclick: () => { if (dispatch({ type: 'offerAgreement', player: p.id, to: o.id })) defenderHandoff(); } }, 'Offer'));
         })));
   }

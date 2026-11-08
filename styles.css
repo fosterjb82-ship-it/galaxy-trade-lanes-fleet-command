@@ -673,3 +673,12 @@ body.still *, body.still *::before, body.still *::after { animation: none !impor
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* Narrow windows: stack the sidebar under the board. */
+@media (max-width: 860px) {
+  .main { flex-direction: column; overflow-y: auto; }
+  .play-col { min-height: 75vh; }
+  .sidebar { width: auto; border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .hand-bar { flex-wrap: wrap; }
+  .details { width: auto; left: 12px; }
+}
