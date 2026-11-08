@@ -86,7 +86,7 @@ export function mountGame(root) {
 
   const board = new Board(canvas);
   document.body.classList.toggle('still', !board.animate);
-  board.on('zoom', (s) => { zoomLabel.textContent = `${s}×`; });
+  board.on('zoom', (s) => { zoomLabel.textContent = `${Math.round((s / board.fitScale()) * 100)}%`; });
   board.decorators.push(unitLayer(() => {
     const view = {
       state, targets: [], selectedShip: null, labels: null, path: null,

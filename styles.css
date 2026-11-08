@@ -28,8 +28,7 @@ html, body {
 
 #app { height: 100%; display: flex; flex-direction: column; }
 
-/* Pixel art images only: keep hard edges when scaled. */
-canvas.sprite, img.sprite { image-rendering: pixelated; image-rendering: crisp-edges; }
+canvas.art { display: block; }
 
 button, input, select {
   font: inherit;

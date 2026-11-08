@@ -1,7 +1,7 @@
 // Board layer for a running game: control outlines, deploy targets and the
-// ships on each tile. Ships are pixel-art sprites; hull numbers are crisp text.
+// ships on each tile. Ships are high-res art; hull numbers are crisp text.
 
-import { sprite, PLAYER_COLORS } from './sprites.js';
+import { art, PLAYER_COLORS, ART_SIZE } from './sprites.js';
 import { TILE_W, TILE_H } from '../map/hex.js';
 import { shipDef, shipSprite } from '../game/ships.js';
 import { controlMap } from '../game/state.js';
@@ -34,14 +34,13 @@ export function unitLayer(getView) {
     for (const [tile, owner] of controlMap(state)) {
       const n = map.nodes[tile];
       if (n.type === 'home' && n.homeOf === owner) continue;
-      board.blit(sprite(`outline:${PLAYER_COLORS[owner].main.slice(1)}:1`), n.x - TILE_W / 2, n.y - TILE_H / 2,
-        { alpha: n.type === 'empty' ? 0.6 : 1 });
+      board.strokeHex(n, PLAYER_COLORS[owner].main, n.type === 'empty' ? 1.5 : 2.2, { alpha: n.type === 'empty' ? 0.55 : 0.95, glow: 5, inset: 1.2 });
     }
 
     // Deploy / placement targets.
     for (const tile of targets ?? []) {
       const n = map.nodes[tile];
-      board.blit(sprite('outline:6dffa8:1'), n.x - TILE_W / 2, n.y - TILE_H / 2);
+      board.strokeHex(n, '#6dffa8', 2.5, { glow: 9, inset: 1.6 });
     }
 
     // Trade routes: dashed lines in the owner's colour (red-tinted if blockaded).
@@ -90,26 +89,29 @@ export function unitLayer(getView) {
     for (const [tile, ships] of byTile) {
       const n = map.nodes[tile];
       const shown = ships.length > SLOTS.length ? ships.slice(0, SLOTS.length - 1) : ships;
+      const size = (ships.length === 1 ? ART_SIZE.ship : ART_SIZE.ship * 0.82) * S;
       shown.forEach((ship, i) => {
         if (fx?.hidden(ship.id, now)) return; // still warping in
         let [ox, oy] = ships.length === 1 ? [0, 6] : SLOTS[i];
         const owner = ship.owner === 'pirate' ? 'pirate' : ship.owner;
-        // Engine flicker, and a gentle 1-pixel hover out of step between ships.
-        const img = sprite(`ship:${shipSprite(ship)}:${owner}@${(tick + idNum(ship.id)) % 2}`);
+        const kind = ship.owner === 'pirate' ? 'pirate' : shipSprite(ship);
+        // Engine flicker, and a gentle hover out of step between ships.
+        const img = art(`ship:${shipSprite(ship)}:${owner}`, size, (tick + idNum(ship.id)) % 4);
+        const flashImg = () => art(`flash:${kind}`, size);
         let flip = n.x > 0; // face toward the centre of the board
         const moving = fx?.position(ship.id, now);
         if (moving) {
           // In flight: drawn at the effect's position, facing its heading.
-          const mx = Math.round(moving.x);
-          const my = Math.round(moving.y);
+          const mx = moving.x;
+          const my = moving.y;
           if (moving.dx) flip = moving.dx < 0;
           board.blitCentered(img, mx, my, { flip });
-          if (fx.flashing(ship.id, now)) board.blitCentered(sprite(`flash:${shipSprite(ship)}`), mx, my, { flip });
+          if (fx.flashing(ship.id, now)) board.blitCentered(flashImg(), mx, my, { flip });
           return;
         }
-        if (Math.floor((tick + idNum(ship.id) * 3) / 8) % 2) oy -= 1;
+        if (board.animate) oy += Math.sin(tick / 5 + idNum(ship.id)) * 0.45;
         board.blitCentered(img, n.x + ox, n.y + oy, { flip });
-        if (fx?.flashing(ship.id, now)) board.blitCentered(sprite(`flash:${shipSprite(ship)}`), n.x + ox, n.y + oy, { flip });
+        if (fx?.flashing(ship.id, now)) board.blitCentered(flashImg(), n.x + ox, n.y + oy, { flip });
         if (ship.id === selectedShip) {
           const p = board.toScreen(n.x + ox, n.y + oy);
           board.ring(p.x, p.y, 8 * S, '#ffffff', 1.5);

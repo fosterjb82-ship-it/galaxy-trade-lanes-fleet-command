@@ -1,13 +1,12 @@
 // Effects player: replays the visual events an action produced (state.fx)
 // as a short timeline on the board.
 //
-// Effects are pixel art (projectiles, explosions, warp rings, sparkles) drawn
-// on the art-pixel grid at whole-number scale; floating numbers are crisp
-// text. While a ship is mid-flight its sprite is drawn at an interpolated
+// Effects (projectiles, explosions, warp rings, sparkles) are smooth glowing
+// vector shapes drawn at native resolution; floating numbers are crisp text. While a ship is mid-flight its sprite is drawn at an interpolated
 // position, and ships destroyed by the action linger as "ghosts" until their
 // explosion plays.
 
-import { sprite, PLAYER_COLORS, PIRATE_COLOR } from './sprites.js';
+import { art, PLAYER_COLORS, PIRATE_COLOR, ART_SIZE } from './sprites.js';
 import { slotOffset } from './units.js';
 
 const STEP_MS = 150; // per tile of movement
@@ -214,8 +213,9 @@ export class FxPlayer {
       const pos = g.follow?.(now) ?? { x: g.x, y: g.y };
       const owner = g.ship.owner === 'pirate' ? 'pirate' : g.ship.owner;
       const type = g.ship.owner === 'pirate' ? 'frigate' : g.ship.type;
-      b.blitCentered(sprite(`ship:${type}:${owner}@${b.frame() % 2}`), Math.round(pos.x), Math.round(pos.y), { flip: pos.x > 0 });
-      if (this.flashing(g.id, now)) b.blitCentered(sprite(`flash:${type}`), Math.round(pos.x), Math.round(pos.y), { flip: pos.x > 0 });
+      const size = ART_SIZE.ship * 0.9 * b.scale;
+      b.blitCentered(art(`ship:${type}:${owner}`, size, b.frame() % 4), pos.x, pos.y, { flip: pos.x > 0 });
+      if (this.flashing(g.id, now)) b.blitCentered(art(`flash:${owner === 'pirate' ? 'pirate' : type}`, size), pos.x, pos.y, { flip: pos.x > 0 });
     }
     // Timeline items.
     for (const it of this.items) {
@@ -233,35 +233,61 @@ export class FxPlayer {
     for (const [id] of this.positions) if (!this.position(id, now)) this.positions.delete(id);
   }
 
-  /** One art pixel (or a size×size block) at board coordinates. */
+  /** A soft glowing dot at board coordinates; size in board units. */
   px(b, x, y, color, size = 1, alpha = 1) {
-    const S = b.scale;
-    const o = b.toScreen(Math.round(x), Math.round(y));
-    b.ctx.globalAlpha = alpha;
-    b.ctx.fillStyle = color;
-    b.ctx.fillRect(o.x, o.y, size * S, size * S);
-    b.ctx.globalAlpha = 1;
+    const p = b.toScreen(x + size / 2, y + size / 2);
+    const r = Math.max(0.8 * b.dpr, size * 0.55 * b.scale);
+    const ctx = b.ctx;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.shadowColor = color;
+    ctx.shadowBlur = r * 2;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
-  /** Pixel line on the art grid (Bresenham). */
-  line(b, a, c, color, every = 1) {
-    let x0 = Math.round(a.x);
-    let y0 = Math.round(a.y);
-    const x1 = Math.round(c.x);
-    const y1 = Math.round(c.y);
-    const dx = Math.abs(x1 - x0);
-    const dy = -Math.abs(y1 - y0);
-    const sx = x0 < x1 ? 1 : -1;
-    const sy = y0 < y1 ? 1 : -1;
-    let err = dx + dy;
-    let i = 0;
-    for (;;) {
-      if (i++ % every === 0) this.px(b, x0, y0, color);
-      if (x0 === x1 && y0 === y1) break;
-      const e2 = 2 * err;
-      if (e2 >= dy) { err += dy; x0 += sx; }
-      if (e2 <= dx) { err += dx; y0 += sy; }
-    }
+  /** A glowing beam between two board points. */
+  line(b, a, c, color, width = 0.7) {
+    const p0 = b.toScreen(a.x, a.y);
+    const p1 = b.toScreen(c.x, c.y);
+    const ctx = b.ctx;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.shadowColor = color;
+    ctx.shadowBlur = width * b.scale * 3;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1.2 * b.dpr, width * b.scale);
+    ctx.beginPath();
+    ctx.moveTo(p0.x, p0.y);
+    ctx.lineTo(p1.x, p1.y);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = Math.max(0.6 * b.dpr, width * b.scale * 0.35);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Radial glow (fireballs, flashes); radius in board units. */
+  glow(b, at, radius, inner, outer, alpha = 1) {
+    const p = b.toScreen(at.x, at.y);
+    const r = Math.max(1, radius * b.scale);
+    const ctx = b.ctx;
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+    g.addColorStop(0, inner);
+    g.addColorStop(0.4, outer);
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   drawShot(b, weapon, from, to, k, color, seed) {
@@ -271,15 +297,15 @@ export class FxPlayer {
     if (weapon === 'laser') {
       // Beam that snaps on, flickers and fades.
       if (k > 0.85) return;
-      this.line(b, from, to, k % 0.2 < 0.1 ? '#ffffff' : color);
-      this.px(b, from.x - 1, from.y - 1, '#ffffff', 2);
+      this.line(b, from, to, color, 0.9 * (1 - k * 0.6));
+      this.glow(b, from, 3, 'rgba(255,255,255,0.9)', color, 1 - k);
     } else if (weapon === 'cannon') {
       const p = lerp(easeInOut(k));
       for (let i = 1; i <= 3; i++) {
         const q = lerp(Math.max(0, easeInOut(k) - i * 0.06));
         this.px(b, q.x, q.y, i === 1 ? '#ffd166' : '#ff8c42', 1, 1 - i * 0.25);
       }
-      this.px(b, p.x - 1, p.y - 1, '#ffffff', 2);
+      this.glow(b, p, 3, 'rgba(255,255,255,1)', 'rgba(255,209,102,0.8)');
     } else if (weapon === 'missile') {
       // Arcing missile with a smoke trail.
       const nx = -(to.y - from.y);
@@ -307,13 +333,14 @@ export class FxPlayer {
         const base = lerp(i / n);
         const j = i === n ? 0 : (rnd() - 0.5) * 8;
         const next = { x: base.x + j, y: base.y + (rnd() - 0.5) * 6 };
-        this.line(b, prev, next, rnd() < 0.3 ? '#ffffff' : '#c58cff');
+        this.line(b, prev, next, rnd() < 0.3 ? '#f3e6ff' : '#b07cff', 0.55);
         prev = next;
       }
     }
   }
 
   drawImpact(b, at, k, weapon) {
+    this.glow(b, at, (weapon === 'cannon' ? 6 : 4) * (0.6 + k), weapon === 'ion' ? 'rgba(240,220,255,0.9)' : 'rgba(255,255,255,0.95)', weapon === 'ion' ? 'rgba(155,92,230,0.6)' : 'rgba(255,170,80,0.6)', 1 - k);
     const r = 2 + k * (weapon === 'cannon' ? 7 : 5);
     const color = weapon === 'ion' ? '#c58cff' : k < 0.4 ? '#ffffff' : '#ffd166';
     for (let i = 0; i < 8; i++) {
@@ -325,10 +352,9 @@ export class FxPlayer {
   drawExplosion(b, at, k, seed) {
     const rnd = seeded(seed);
     // Core flash.
-    if (k < 0.25) {
-      const s = Math.round(2 + k * 16);
-      this.px(b, at.x - s / 2, at.y - s / 2, k < 0.12 ? '#ffffff' : '#ffd166', s, 1 - k * 2);
-    }
+    // Fireball: white core blooming into orange, then smoke.
+    this.glow(b, at, 4 + k * 14, 'rgba(255,255,240,1)', 'rgba(255,140,50,0.75)', 1 - k * 1.3);
+    if (k > 0.3) this.glow(b, { x: at.x, y: at.y - k * 4 }, 8 + k * 10, 'rgba(90,90,110,0.35)', 'rgba(40,40,55,0.2)', 1 - k);
     // Debris.
     const colors = ['#ffffff', '#ffd166', '#ff8c42', '#e5484d', '#5a6278'];
     for (let i = 0; i < 22; i++) {
@@ -344,18 +370,24 @@ export class FxPlayer {
   }
 
   drawWarp(b, at, k, color) {
-    // Two diamond rings closing in, then a flash.
+    // Two rings closing in on the arrival point, then a flash.
+    const ctx = b.ctx;
+    const p = b.toScreen(at.x, at.y);
     for (const [delay, c] of [[0, color], [0.15, '#ffffff']]) {
-      const q = clamp01((k - delay) / 0.6);
+      const q = Math.max(0, Math.min(1, (k - delay) / 0.6));
       if (q <= 0 || q >= 1) continue;
-      const r = Math.round(14 * (1 - q));
-      for (let i = -r; i <= r; i++) {
-        const j = r - Math.abs(i);
-        this.px(b, at.x + i, at.y + j, c, 1, 1 - q * 0.5);
-        this.px(b, at.x + i, at.y - j, c, 1, 1 - q * 0.5);
-      }
+      ctx.save();
+      ctx.globalAlpha = 1 - q * 0.5;
+      ctx.strokeStyle = c;
+      ctx.shadowColor = c;
+      ctx.shadowBlur = 10 * b.dpr;
+      ctx.lineWidth = Math.max(1.5 * b.dpr, 0.6 * b.scale);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, (14 * (1 - q)) * b.scale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
     }
-    if (k > 0.55 && k < 0.8) this.px(b, at.x - 3, at.y - 3, '#ffffff', 6, 1 - (k - 0.55) * 4);
+    if (k > 0.5 && k < 0.85) this.glow(b, at, 7, 'rgba(255,255,255,1)', 'rgba(140,220,255,0.6)', 1 - (k - 0.5) * 3);
   }
 
   drawRepair(b, at, k, seed) {

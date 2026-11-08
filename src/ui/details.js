@@ -2,7 +2,7 @@
 
 import { enterCost } from '../map/generator.js';
 import { neighbors, key } from '../map/hex.js';
-import { PLAYER_COLORS, tileSpriteKey, featureSpriteKey, sprite } from '../render/sprites.js';
+import { PLAYER_COLORS, tileSpriteKey, featureSpriteKey, featureSize, art, TILE_BOX } from '../render/sprites.js';
 import { h, spriteIcon } from './dom.js';
 
 export const TYPE_LABEL = {
@@ -41,26 +41,24 @@ export function tileTitle(node) {
   return node.name ?? TYPE_LABEL[node.type];
 }
 
-/** A DOM canvas showing a whole tile (background + feature) as pixel art. */
+/** A DOM canvas showing a whole tile (background + feature) in high resolution. */
 export function tilePreview(node, reveal, cssWidth = 84) {
-  const bg = sprite(tileSpriteKey(node));
   const dpr = window.devicePixelRatio || 1;
-  const scale = Math.max(1, Math.floor((cssWidth * dpr) / bg.width));
+  const W = Math.round(cssWidth * dpr);
+  const unit = W / TILE_BOX.w;
+  const bg = art(tileSpriteKey(node), W);
   const c = document.createElement('canvas');
-  c.className = 'sprite';
-  c.width = bg.width * scale;
-  c.height = bg.height * scale;
-  c.style.width = `${c.width / dpr}px`;
-  c.style.height = `${c.height / dpr}px`;
+  c.className = 'art';
+  c.width = bg.width;
+  c.height = bg.height;
+  c.style.width = `${bg.width / dpr}px`;
+  c.style.height = `${bg.height / dpr}px`;
   const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(bg, 0, 0, c.width, c.height);
+  ctx.drawImage(bg, 0, 0);
   const fk = featureSpriteKey(node, { revealHidden: reveal });
   if (fk) {
-    const f = sprite(fk);
-    const x = (Math.floor(bg.width / 2) - Math.floor(f.width / 2)) * scale;
-    const y = (Math.floor(bg.height / 2) - Math.floor(f.height / 2)) * scale;
-    ctx.drawImage(f, x, y, f.width * scale, f.height * scale);
+    const f = art(fk, featureSize(fk) * unit);
+    ctx.drawImage(f, (bg.width - f.width) / 2, (bg.height - f.height) / 2);
   }
   return c;
 }

@@ -42,7 +42,7 @@ There is no build step: plain ES modules, no dependencies.
   - choke-point intersections carry at least 1.5× the average share of shortest paths.
 
   A candidate that fails any check is discarded. The Map Lab lists rejected attempts and lets you open each one to see the failure.
-- **Zoom and details:** zoom with *+ / −* (also the keyboard, or the scroll wheel). Zoom always steps between whole-number pixel scales so the art stays sharp. *Fit* (or `0`) shows the whole board, and dragging pans. Click any tile to open its details pane, which shows:
+- **Zoom and details:** zoom with *+ / −* (also the keyboard, or the scroll wheel). Zoom moves in smooth 20% steps, and the art is redrawn at each size so it stays sharp. *Fit* (or `0`) shows the whole board, and dragging pans. Click any tile to open its details pane, which shows:
   - its effect;
   - movement cost;
   - Command Points and VP value;
@@ -155,19 +155,31 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - Planets turn: continents and polar caps drift across rocky worlds, and a storm rotates on the gas-giant core.
   - Station lights chase around the ring, jump gates turn and pulse, and trade beacons blink.
   - Nebulas shimmer, hidden tiles churn, and void rifts sparkle.
-  - Stars twinkle, ship engines flicker, and ships hover by a pixel.
+  - Stars twinkle, ship engines flicker, and ships hover gently.
 - **Event animations:**
   - The engine records each action's visual events (`state.fx`); `src/render/fx.js` plays them back in order.
   - Ships fly along their path, and Retreat and pirate moves animate too.
   - Weapons: laser beams, cannon shells with tracers, arcing missiles with smoke trails, and ion lightning.
   - Hits show impact sparks, a white flash and a floating damage number.
-  - Destroyed ships explode in pixel debris with screen shake; their sprite stays until the explosion.
+  - Destroyed ships explode in a fireball with debris and screen shake; the wreck stays visible until the explosion.
   - Deploys warp in. Repairs, hidden-tile reveals and trade income each have their own effect.
   - Dialogs (combat report, mission reveal, round summary) wait until the effects finish.
   - Start-of-turn repairs and income play once the next player reveals their hand.
 - **Interface motion:** cards deal into your hand, dialogs and handoff screens rise in, and the Imperial Ceasefire banner shines.
-- **Rendering rules:** every effect is pixel art on the whole-pixel grid, and numbers stay as sharp text. Screen shake moves by whole art pixels so the grid never blurs.
+- **Rendering:** effects are glowing vector shapes (beams, tracers, smoke trails, fireballs, warp rings), and numbers stay as sharp text.
 - **Toggle:** an *Animations* switch in the top bar turns everything off. It defaults to off when the system asks for reduced motion.
+
+### High-resolution art
+
+All artwork is drawn procedurally at the exact device-pixel size it is shown at (`src/render/art/`). It stays sharp at every zoom level and on high-DPI screens:
+
+- **Planets** are shaded spheres mapped from seamless noise textures: continents, oceans with a sun glint, polar ice, drifting clouds, atmosphere glow and rings. The six looks are a terran world for each home, jungle, rust (cratered), ice, violet, and a banded gas giant for the core. They turn slowly.
+- **Ships** are vector illustrations: metallic hulls, panel lines, glass cockpits, turrets, missile pods and flight decks. Each has player-colour trim and flickering engine flames. Pirates have gunmetal hulls, red trim and spikes.
+- **Tiles** are smooth hexes with starfields and bevelled rims. Nebulas are soft, shifting clouds. Asteroid fields hold shaded rocks with craters. Void rifts have glowing cracks.
+- **Features:** ring stations with docking arms and a gold hub, turning jump gates, solar-panel trade beacons and swirling hidden anomalies.
+- **Card icons** are drawn the same way.
+
+Images are cached by key, size and animation frame. Text, numbers, outlines and effects are drawn as vectors at native resolution.
 
 ## Rules decided where the design was silent or didn't fit the hex board
 
@@ -188,8 +200,9 @@ src/map/generator.js    map generation steps 1–6
 src/map/fairness.js     independent fairness checks
 src/map/hex.js          axial hex maths, rotations, pixel <-> tile
 src/map/graph.js        BFS, Dijkstra, components, betweenness
-src/render/sprites.js   pixel-art hex tiles and sprites (procedural + hand-drawn)
-src/render/board.js     canvas hex board: integer zoom, pan, hit testing, crisp text
+src/render/sprites.js   art facade: any image by key at an exact pixel size, cached
+src/render/art/         high-res procedural art: planets, ships, tiles, features, icons
+src/render/board.js     canvas hex board: smooth zoom, pan, hit testing, crisp text
 src/game/ships.js       ship stats, CP costs, pirate fleets
 src/game/cards.js       card definitions, starting deck, market deck
 src/game/state.js       game state, control, CP, turn flow, actions

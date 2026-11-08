@@ -1,5 +1,5 @@
 // Minimal DOM helpers.
-import { sprite } from '../render/sprites.js';
+import { art } from '../render/sprites.js';
 
 /** h('div.cls#id', {attrs}, ...children) */
 export function h(tag, attrs = {}, ...children) {
@@ -27,21 +27,18 @@ export function h(tag, attrs = {}, ...children) {
 }
 
 /**
- * A DOM canvas showing a sprite at a whole-number scale of device pixels,
- * so pixel art stays sharp in the HTML UI too.
+ * A DOM canvas showing a piece of game art, rendered at the screen's full
+ * resolution so it stays sharp. cssSize is the width in CSS pixels.
  */
 export function spriteIcon(key, cssSize = 32) {
-  const img = sprite(key);
   const dpr = window.devicePixelRatio || 1;
-  const scale = Math.max(1, Math.floor((cssSize * dpr) / Math.max(img.width, img.height)));
+  const img = art(key, cssSize * dpr);
   const c = document.createElement('canvas');
-  c.className = 'sprite';
-  c.width = img.width * scale;
-  c.height = img.height * scale;
-  c.style.width = `${c.width / dpr}px`;
-  c.style.height = `${c.height / dpr}px`;
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0, c.width, c.height);
+  c.className = 'art';
+  c.width = img.width;
+  c.height = img.height;
+  c.style.width = `${img.width / dpr}px`;
+  c.style.height = `${img.height / dpr}px`;
+  c.getContext('2d').drawImage(img, 0, 0);
   return c;
 }

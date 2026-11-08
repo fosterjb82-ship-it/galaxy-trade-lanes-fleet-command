@@ -1,17 +1,20 @@
 // Canvas hex-board renderer.
 //
-// Images (hex tiles, features, ships, stars) are pixel art drawn at a whole
-// number of device pixels per art pixel ("pixel scale"), with smoothing off.
-// Zoom steps between whole-number scales so the art never blurs. Text and
-// numbers are drawn at native device resolution, so they stay sharp.
+// Board coordinates are "board units": a tile is 28 wide and 32 tall, and
+// `scale` is device pixels per board unit. All art is rendered by ./sprites.js
+// at the exact device-pixel size it is drawn at, so tiles, planets and ships
+// stay sharp at every zoom step and on high-DPI screens. Text, numbers and
+// outlines are drawn as vectors at native resolution.
 
-import { sprite, tileSpriteKey, featureSpriteKey, PLAYER_COLORS } from './sprites.js';
+import { art, tileSpriteKey, featureSpriteKey, featureSize, ART_SIZE, PLAYER_COLORS } from './sprites.js';
+import { hexPath } from './art/core.js';
 import { TILE_W, TILE_H, fromPixel, key } from '../map/hex.js';
 import { Rng } from '../rng.js';
 
 const FONT = '"Inter", "Segoe UI", system-ui, -apple-system, sans-serif';
-const MIN_SCALE = 1;
-const MAX_SCALE = 14;
+const MIN_SCALE = 0.8;
+const MAX_SCALE = 18;
+const ZOOM_STEP = 1.2;
 const TICK_MS = 125; // ambient animation steps 8 times a second
 
 /** Animations are on unless the viewer asked for reduced motion (or turned them off). */
@@ -124,13 +127,13 @@ export class Board {
 
   // ------------------------------------------------------------ view
 
-  /** Largest whole-number scale at which the whole board fits. */
+  /** Scale at which the whole board fits the canvas. */
   fitScale() {
     if (!this.map) return 3;
     const b = this.map.bounds;
-    const w = b.maxX - b.minX + TILE_W;
-    const h = b.maxY - b.minY + TILE_H;
-    return Math.max(MIN_SCALE, Math.floor(Math.min(this.canvas.width / w, this.canvas.height / h)));
+    const w = b.maxX - b.minX + TILE_W * 0.6;
+    const h = b.maxY - b.minY + TILE_H * 0.6;
+    return Math.max(MIN_SCALE, Math.min(this.canvas.width / w, this.canvas.height / h) * 0.97);
   }
 
   fit() {
@@ -148,10 +151,9 @@ export class Board {
     let sx = 0;
     let sy = 0;
     if (this.animate && this.now < this.shake.until) {
-      // Shake in whole art pixels so the pixel grid stays crisp.
-      const p = this.shake.power;
-      sx = Math.round((Math.random() * 2 - 1) * p) * this.scale;
-      sy = Math.round((Math.random() * 2 - 1) * p) * this.scale;
+      const p = this.shake.power * this.scale * 0.8;
+      sx = Math.round((Math.random() * 2 - 1) * p);
+      sy = Math.round((Math.random() * 2 - 1) * p);
     }
     return {
       x: Math.round(this.canvas.width / 2 - this.center.x * this.scale) + sx,
@@ -159,7 +161,7 @@ export class Board {
     };
   }
 
-  /** Brief screen shake, `power` in art pixels. */
+  /** Brief screen shake, `power` in board units. */
   shakeFor(ms, power = 1) {
     if (!this.animate) return;
     this.shake = { until: this.now + ms, power };
@@ -186,10 +188,10 @@ export class Board {
     return { x: (sx - o.x) / this.scale, y: (sy - o.y) / this.scale };
   }
 
-  /** Zoom one whole-number step in (+1) or out (-1), keeping `anchor` fixed. */
+  /** Zoom one step in (+1) or out (-1), keeping `anchor` fixed. */
   zoomBy(step, anchor = null) {
-    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.scale + step));
-    if (next === this.scale) return;
+    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, this.scale * ZOOM_STEP ** step));
+    if (Math.abs(next - this.scale) < 1e-6) return;
     this.userView = true;
     const a = anchor ?? { x: this.canvas.width / 2, y: this.canvas.height / 2 };
     const before = this.toBoard(a.x, a.y);
@@ -269,29 +271,49 @@ export class Board {
 
   // ------------------------------------------------------------ drawing helpers
 
-  /** Draw art with its top-left at a board point (in art pixels). */
-  blit(img, bx, by, { flip = false, alpha = 1 } = {}) {
-    const S = this.scale;
+  /** Draw a device-sized image centred on a board point. */
+  blitCentered(img, bx, by, { flip = false, alpha = 1 } = {}) {
     const p = this.toScreen(bx, by);
     const ctx = this.ctx;
-    const w = img.width * S;
-    const h = img.height * S;
     ctx.save();
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.globalAlpha = alpha;
+    const x = Math.round(p.x - img.width / 2);
+    const y = Math.round(p.y - img.height / 2);
     if (flip) {
-      ctx.translate(p.x + w, p.y);
+      ctx.translate(x + img.width, y);
       ctx.scale(-1, 1);
-      ctx.drawImage(img, 0, 0, w, h);
+      ctx.drawImage(img, 0, 0);
     } else {
-      ctx.drawImage(img, p.x, p.y, w, h);
+      ctx.drawImage(img, x, y);
     }
     ctx.restore();
   }
 
-  /** Draw art centred on a tile centre, snapped to whole art pixels. */
-  blitCentered(img, bx, by, opts) {
-    this.blit(img, bx - Math.floor(img.width / 2), by - Math.floor(img.height / 2), opts);
+  /** Draw art by key, `units` board units wide, centred on a board point. */
+  drawArt(key, bx, by, units, opts) {
+    this.blitCentered(art(key, units * this.scale), bx, by, opts);
+  }
+
+  /** Vector hex outline around a tile. width in CSS px; inset in board units. */
+  strokeHex(n, color, width = 2, { alpha = 1, glow = 0, inset = 0.8, dash = null } = {}) {
+    const ctx = this.ctx;
+    const c = this.toScreen(n.x, n.y);
+    const r = (TILE_W / Math.sqrt(3) - inset) * this.scale;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    hexPath(ctx, c.x, c.y, r);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = this.px(width);
+    ctx.strokeStyle = color;
+    if (dash) ctx.setLineDash(dash.map((d) => this.px(d)));
+    if (glow) {
+      ctx.shadowColor = color;
+      ctx.shadowBlur = this.px(glow);
+    }
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** Crisp text at device resolution. size is in CSS pixels. */
@@ -357,15 +379,14 @@ export class Board {
     if (!this.map) return;
     const S = this.scale;
     const map = this.map;
-    const starPx = Math.max(1, Math.round(S / 2));
 
-    // Distant starfield (screen space, pixel art).
+    // Distant starfield (screen space).
     for (const st of this.stars) {
-      // A few stars twinkle.
-      ctx.fillStyle = st.twinkle && this.animate && (this.frame() + st.twinkle) % 23 < 2 ? '#ffffff' : st.tone;
-      const x = Math.floor((st.x * W) / starPx) * starPx;
-      const y = Math.floor((st.y * H) / starPx) * starPx;
-      ctx.fillRect(x, y, st.size * starPx, st.size * starPx);
+      const tw = st.twinkle && this.animate ? (this.frame() + st.twinkle) % 23 : 99;
+      ctx.fillStyle = tw < 2 ? '#ffffff' : st.tone;
+      ctx.beginPath();
+      ctx.arc(st.x * W, st.y * H, (st.size * 0.6 + (tw < 2 ? 0.6 : 0)) * this.dpr, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // Tiles.
@@ -375,40 +396,36 @@ export class Board {
     };
     const shown = map.nodes.filter(visible);
     const tick = this.frame();
-    for (const n of shown) this.blit(sprite(tileSpriteKey(n, tick)), n.x - TILE_W / 2, n.y - TILE_H / 2);
+    for (const n of shown) this.drawArt(tileSpriteKey(n, tick), n.x, n.y, TILE_W);
 
-    // Home outlines in player colour.
+    // Home sectors and the galactic core get a coloured rim.
     for (const n of shown) {
-      if (n.type === 'home') {
-        this.blit(sprite(`outline:${PLAYER_COLORS[n.homeOf].main.slice(1)}:1`), n.x - TILE_W / 2, n.y - TILE_H / 2);
-      } else if (n.core) {
-        this.blit(sprite('outline:c9971f:1'), n.x - TILE_W / 2, n.y - TILE_H / 2);
-      }
+      if (n.type === 'home') this.strokeHex(n, PLAYER_COLORS[n.homeOf].main, 2.5, { glow: 8 });
+      else if (n.core) this.strokeHex(n, '#e8b84a', 2, { glow: 6, alpha: 0.9 });
     }
 
     // Features.
+    const lift = this.options.showLabels && (TILE_W * S) / this.dpr >= 64 ? 2 : 0;
     for (const n of shown) {
       const k = featureSpriteKey(n, { revealHidden: this.options.revealHidden, tick });
-      if (k) this.blitCentered(sprite(k), n.x, n.y - (this.options.showLabels && n.name && S >= 3 ? 2 : 0));
+      if (k) this.drawArt(k, n.x, n.y - (n.name ? lift : 0), featureSize(k));
     }
 
-    // Pirates.
+    // Pirates (Map Lab preview; games draw ships in their own layer).
     for (const pirate of map.pirates ?? []) {
       const n = map.nodes[pirate.node];
       if (!visible(n)) continue;
-      this.blitCentered(sprite('ship:frigate:pirate'), n.x, n.y, { flip: true });
-      const p = this.toScreen(n.x + 7, n.y - 8);
+      this.drawArt('ship:pirate:pirate', n.x, n.y + 4, ART_SIZE.ship, { flip: true });
+      const p = this.toScreen(n.x + 7, n.y - 4);
       this.drawBadge(String(pirate.hull), p.x, p.y, { bg: '#3a0d0d', border: '#d23c3c', size: S >= 3 ? 11 : 9 });
     }
 
     // Hover and selection outlines.
     if (this.hover !== null && this.hover !== this.selected) {
-      const n = map.nodes[this.hover];
-      this.blit(sprite('outline:ffffff:1'), n.x - TILE_W / 2, n.y - TILE_H / 2, { alpha: 0.55 });
+      this.strokeHex(map.nodes[this.hover], '#ffffff', 2, { alpha: 0.5 });
     }
     if (this.selected !== null) {
-      const n = map.nodes[this.selected];
-      this.blit(sprite('outline:ffffff:2'), n.x - TILE_W / 2, n.y - TILE_H / 2);
+      this.strokeHex(map.nodes[this.selected], '#ffffff', 3, { glow: 10 });
     }
 
     // Text layer (native resolution).

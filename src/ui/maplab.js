@@ -72,7 +72,7 @@ export function mountMapLab(root) {
   root.append(topbar, h('div.main', boardWrap, sidebar));
 
   const board = new Board(canvas);
-  board.on('zoom', (s) => { zoomLabel.textContent = `${s}×`; });
+  board.on('zoom', (s) => { zoomLabel.textContent = `${Math.round((s / board.fitScale()) * 100)}%`; });
 
   function show(map, { keepView = false } = {}) {
     board.setMap(map, { keepView });
