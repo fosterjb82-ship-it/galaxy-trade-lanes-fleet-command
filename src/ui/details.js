@@ -122,7 +122,7 @@ export function tileDetails(o) {
       title: names[hm.homeOf],
     }, `${names[hm.homeOf]}: ${costs[hm.id][id] === Infinity ? '—' : costs[hm.id][id]}`))),
     h('h3', 'Neighbouring tiles'),
-    h('ul.neighbours', adjacent.map((n) => h('li', { onclick: () => o.onNavigate(n.id), title: 'Show this tile' },
+    h('ul.neighbours', adjacent.map((n) => h('li', { onclick: () => o.onNavigate(n.id), 'data-tip': `tile:${n.id}` },
       spriteIcon(featureSpriteKey(n, { revealHidden: reveal }) ?? tileSpriteKey(n), 18),
       h('span', tileTitle(n)),
       h('span.muted', n.name ? TYPE_LABEL[n.type] : '')))),

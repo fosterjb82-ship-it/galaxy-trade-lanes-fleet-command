@@ -821,3 +821,58 @@ ul.missions li canvas.art { border-radius: 6px; width: 100% !important; height: 
   .table { width: auto; border-right: 0; border-bottom: 1px solid var(--line); }
   .tcards { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
 }
+
+/* ================================================================ hover tooltips */
+
+.tip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 100;
+  width: 332px;
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(12, 17, 34, 0.97);
+  border: 1px solid #34457a;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(111, 227, 255, 0.06) inset;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px) scale(0.97);
+  transform-origin: top left;
+  transition: opacity 0.16s ease-out, transform 0.16s ease-out;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.tip.show { opacity: 1; transform: none; }
+.tip > canvas.art { width: 100% !important; height: auto !important; border-radius: 10px; }
+.tip-tile { display: grid; place-items: center; padding: 4px 0; background: radial-gradient(60% 60% at 50% 50%, rgba(80, 120, 220, 0.18), transparent 70%); border-radius: 10px; }
+.tip-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 2px; }
+.tip-title { font-size: 17px; }
+.tip-cost {
+  background: #ffd166;
+  color: #2a1d00;
+  font-weight: 800;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+}
+.tip-cost.vp { background: #c58cff; color: #1a0a33; }
+.tip-cost.hull { background: #3ddc84; color: #04210f; }
+.tip-kind { color: var(--accent); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.tip-text { margin: 2px 0 0; color: var(--text); }
+.tip-note { margin: 0; color: #ffd9a0; font-size: 12px; }
+.tip-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); }
+.tip-stat { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; min-width: 0; }
+.tip-stat span { color: var(--muted); }
+.tip-stat b { text-align: right; }
+.tip-rules { margin: 0; padding-left: 16px; display: grid; gap: 3px; color: #c3cbe6; font-size: 12px; line-height: 1.35; }
+.tip-hint { margin: 0; color: var(--muted); font-size: 11px; font-style: italic; }
+body.still .tip { transition: none; }
+@media (prefers-reduced-motion: reduce) { .tip { transition: none; } }

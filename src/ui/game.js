@@ -20,6 +20,7 @@ import { MISSIONS, missionProgressText } from '../game/missions.js';
 import { attackOptions, describeDamage, shipStats } from '../game/combat.js';
 import { h, spriteIcon } from './dom.js';
 import { cardFace, cardLarge } from './card.js';
+import { installTooltips, cardTip, missionTip, tileTip, shipTip } from './tooltip.js';
 import { tileDetails, tileTitle, row } from './details.js';
 import { loadGame, saveGame, clearGame } from './storage.js';
 
@@ -269,6 +270,65 @@ export function mountGame(root) {
     return best?.sh ?? null;
   }
 
+  // ---------------------------------------------------------- hover tooltips
+
+  function tileTipFor(id) {
+    const node = state.map.nodes[id];
+    const ships = shipsAt(state, id);
+    const ctrl = controllerOf(state, id);
+    let controller = ctrl === null ? 'No one' : state.players[ctrl].name;
+    if (ctrl === null && ships.length) controller = ships.every((x) => x.owner === 'pirate') ? 'No one (pirates hold it)' : 'No one (tied hull)';
+    const found = { derelict: 'derelict', bonus: 'bonus cache', pirateNest: 'pirate nest' };
+    const shown = { ...state.map, nodes: state.map.nodes.map((n) => (n.revealed ? { ...n, hidden: false } : n)) };
+    return tileTip(shown, id, {
+      controller: node.type === 'void' ? null : controller,
+      ships: ships.map((x) => `${x.owner === 'pirate' ? 'pirate fleet' : `${state.players[x.owner].name}'s ${SHIPS[x.type].name.toLowerCase()}`} (${x.hull})`),
+      revealed: node.revealed ? `Revealed: it held a ${found[node.hiddenContent]}.` : null,
+    });
+  }
+
+  function shipTipFor(id) {
+    const ship = state.ships.find((x) => x.id === id);
+    if (!ship) return null;
+    const status = [];
+    if (ship.disabled !== undefined) status.push('Disabled by ion this turn.');
+    if (ship.firedTurn === state.turnNumber) status.push('Has fired this turn.');
+    const route = state.routes.find((r) => r.ship === id);
+    if (route) status.push(`Runs the trade route ${route.label}.`);
+    return shipTip(ship, {
+      ownerName: ship.owner === 'pirate' ? 'Neutral pirate fleet' : `${state.players[ship.owner].name}'s fleet · ${tileTitle(state.map.nodes[ship.tile])}`,
+      stats: shipStats(state, ship),
+      upgrades: ship.upgrades.map((u) => CARDS[state.cards[u].def]),
+      status,
+    });
+  }
+
+  function missionTipFor(id) {
+    const p = me();
+    const held = !concealed && p.missions.find((m) => m.id === id);
+    if (!held) return missionTip(id);
+    return missionTip(id, held.scored ? 'Complete' : missionProgressText(state, p, id), held.scored ? `Scored +${MISSIONS[id].vp} VP` : null);
+  }
+
+  const tips = installTooltips((kind, args) => {
+    if (kind === 'card') return cardTip(args[0], args[1] ?? '', { price: args[2] ? Number(args[2]) : null });
+    if (kind === 'mission') return missionTipFor(args[0]);
+    if (kind === 'ship') return shipTipFor(args[0]);
+    if (kind === 'tile') return tileTipFor(Number(args[0]));
+    return null;
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.buttons) return tips.hide(); // panning
+    const r = canvas.getBoundingClientRect();
+    const tile = board.tileAt({ x: (e.clientX - r.left) * board.dpr, y: (e.clientY - r.top) * board.dpr });
+    const sh = shipUnder(tile, e);
+    if (sh) return tips.hover(`ship:${sh.id}`, () => shipTipFor(sh.id), e);
+    if (tile !== null) return tips.hover(`tile:${tile}`, () => tileTipFor(tile), e);
+    return tips.hide();
+  });
+  canvas.addEventListener('pointerleave', () => tips.hide());
+
   board.on('click', (tile, e) => {
     if (concealed || fxp.isBusy()) return;
     if (tile === null) {
@@ -374,7 +434,7 @@ export function mountGame(root) {
   function shipRow(ship) {
     const def = shipDef(ship);
     const color = ship.owner === 'pirate' ? '#ff8a7a' : PLAYER_COLORS[ship.owner].light;
-    return h('li.ship-row.clickable', { onclick: () => openShip(ship.id), title: 'Show this ship' },
+    return h('li.ship-row.clickable', { onclick: () => openShip(ship.id), 'data-tip': `ship:${ship.id}` },
       spriteIcon(`ship:${ship.owner === 'pirate' ? 'frigate' : ship.type}:${ship.owner === 'pirate' ? 'pirate' : ship.owner}`, 26),
       h('div',
         h('div', h('b', def.name), h('span', { style: { color } }, ` · ${ownerName(ship.owner)}`)),
@@ -410,7 +470,8 @@ export function mountGame(root) {
     const pct = Math.max(0, Math.min(100, (ship.hull / def.hull) * 100));
     const upgradeSlot = (u) => {
       const ud = CARDS[state.cards[u].def];
-      return h('div.slot', spriteIcon(`cardart:${state.cards[u].def}:${pirate ? '' : ship.owner}`, 88),
+      return h('div.slot', { 'data-tip': `card:${state.cards[u].def}:${pirate ? '' : ship.owner}` },
+        spriteIcon(`cardart:${state.cards[u].def}:${pirate ? '' : ship.owner}`, 88),
         h('div', h('b', ud.name), h('div.muted.small', ud.text)));
     };
     const emptySlot = () => h('div.slot.empty', h('div.slot-plus', '+'),
@@ -589,7 +650,7 @@ export function mountGame(root) {
       const p = state.players[r.player];
       const ms = p.missions.map((m) => {
         const def = MISSIONS[m.id];
-        return h(`span.mission-chip${m.scored ? '.ok' : '.no'}`, { title: def.text }, `${m.scored ? '✔' : '✖'} ${def.name}${m.scored ? ` +${def.vp}` : ''}`);
+        return h(`span.mission-chip${m.scored ? '.ok' : '.no'}`, { 'data-tip': `mission:${m.id}` }, `${m.scored ? '✔' : '✖'} ${def.name}${m.scored ? ` +${def.vp}` : ''}`);
       });
       return h(`tr${r.place === 1 ? '.winner' : ''}`,
         h('td', h('b', r.place === 1 ? '🏆 1' : r.place)),
@@ -655,6 +716,7 @@ export function mountGame(root) {
       list.replaceChildren(...p.missionOffer.map((id) => {
         const def = MISSIONS[id];
         return h(`button.mission-card${keep.has(id) ? '.on' : ''}`, {
+          'data-tip': `mission:${id}`,
           onclick: () => {
             if (keep.has(id)) keep.delete(id);
             else if (keep.size < 2) keep.add(id);
@@ -991,7 +1053,8 @@ export function mountGame(root) {
     const kind = card.upgradeKind ? `${card.upgradeKind} upgrade` : TYPE_WORD[card.type];
     return h(`button.tcard.type-${card.type}${afford ? '' : '.cant'}`, {
       type: 'button',
-      title: `${card.name}: ${card.text}`,
+      'data-tip': `card:${defId}:${p.id}:${price}`,
+      'aria-label': `${card.name}, costs ${price}. ${card.text}`,
       onclick: () => inspectCard(defId, uid),
     },
     spriteIcon(`cardart:${defId}:${p.id}`, 108),
@@ -1089,7 +1152,7 @@ export function mountGame(root) {
     if (p.missionOffer.length) return h('button.primary', { onclick: missionDialog }, 'Choose your 2 secret missions');
     return h('ul.missions', p.missions.map((m) => {
       const def = MISSIONS[m.id];
-      return h(`li${m.scored ? '.scored' : ''}`,
+      return h(`li${m.scored ? '.scored' : ''}`, { 'data-tip': `mission:${m.id}` },
         spriteIcon(`mission:${m.id}`, 300),
         h('div', h('b', def.name), h('span.muted.small', ` · ${def.timing === 'immediate' ? 'immediate' : 'end of game'} · ${def.vp} VP`)),
         h('div.small.muted', def.text),
@@ -1114,7 +1177,7 @@ export function mountGame(root) {
         meter.el,
         meter.used > meter.cap.total && h('div.warn.small', 'Over capacity: no new ships until you are back under.'),
         h('ul.cp-breakdown', meter.cap.breakdown.length
-          ? meter.cap.breakdown.map((b) => h('li', { onclick: () => openDetails(b.tile) },
+          ? meter.cap.breakdown.map((b) => h('li', { onclick: () => openDetails(b.tile), 'data-tip': `tile:${b.tile}` },
             h('span', `${CP_LABEL[b.type]} · ${b.label}`), h('b', `+${b.amount}`)))
           : h('li.muted', 'You control no CP-giving tiles.'))),
 
@@ -1125,7 +1188,7 @@ export function mountGame(root) {
 
       h('h2', `Fleet on the board (${fleet.length})`),
       fleet.length
-        ? h('ul.fleet', fleet.map((s) => h('li', { onclick: () => openShip(s.id), title: 'Show this ship' },
+        ? h('ul.fleet', fleet.map((s) => h('li', { onclick: () => openShip(s.id), 'data-tip': `ship:${s.id}` },
           spriteIcon(`ship:${s.type}:${s.owner}`, 22),
           h('span', SHIPS[s.type].name),
           h('span.muted.small', tileTitle(state.map.nodes[s.tile])),

@@ -33,11 +33,12 @@ export function cardFace(defId, o = {}) {
   const ship = def.ship ? SHIPS[def.ship] : null;
   return h(`button.card.type-${def.type}.${o.state ?? 'playable'}`, {
     type: 'button',
-    title: o.note ?? def.text,
+    'data-tip': `card:${defId}:${o.owner ?? ''}`,
+    'aria-label': `${def.name}. ${o.note ?? def.text}`,
     onclick: o.onClick,
     'aria-pressed': o.state === 'selected' ? 'true' : 'false',
   },
-  h('div.card-top', h('span.card-name', def.name), def.cost > 0 && h('span.card-cost', { title: 'Cost to buy' }, def.cost)),
+  h('div.card-top', h('span.card-name', def.name), def.cost > 0 && h('span.card-cost', def.cost)),
   h('div.card-art', spriteIcon(`cardart:${defId}:${o.owner ?? ''}`, 110)),
   h('div.card-type', typeLabel(def)),
   ship

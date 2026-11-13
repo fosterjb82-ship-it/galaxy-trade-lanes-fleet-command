@@ -192,6 +192,15 @@ Images are cached by key, size and animation frame. Text, numbers, outlines and 
   - its status (ion-disabled, already fired), location and trade route;
   - every upgrade slot, filled with the fitted card or marked empty. On your turn, upgrades in your hand that fit can be fitted from there.
 
+### Hover tooltips
+
+Rest the pointer on something for **2 seconds** to see a magnified picture with its details and the rules behind it. Moving off, clicking, scrolling or pressing a key hides it again.
+
+- **Cards** (hand, table, dialogs, upgrade slots): illustration, cost, type, ship stats, restrictions, and how the card works in play (damage maths, reaction timing, slot rules…).
+- **Missions:** illustration, VP, timing, how scoring works, and your progress if it is one of yours.
+- **Tiles** (board, Map Lab, neighbour lists, CP sources): movement cost, CP and VP value, who controls it, ships present, hidden-tile and terrain rules.
+- **Ships** (board, ship lists, fleet list): artwork, hull, speed, weapons, shields, armor, CP, fitted upgrades, status and repair rules (pirate behaviour for pirate fleets).
+
 ## Rules decided where the design was silent or didn't fit the hex board
 
 - Control needs ships present (your empty home stays yours). Pirates block control but never hold it.
@@ -224,6 +233,6 @@ src/game/missions.js    the 18 secret missions and their progress
 src/game/pirates.js     end-of-round pirate phase
 src/render/units.js     ships, control outlines and deploy targets on the board
 src/render/fx.js        effects player: moves, shots, explosions, warp-ins, floating numbers
-src/ui/                 screens: setup, game, Map Lab; cards; details pane
+src/ui/                 screens: setup, game, Map Lab; cards; details pane; hover tooltips
 tests/                  node --test suites
 ```

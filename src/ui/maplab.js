@@ -8,6 +8,7 @@ import { Board } from '../render/board.js';
 import { PLAYER_COLORS } from '../render/sprites.js';
 import { h, spriteIcon } from './dom.js';
 import { tileDetails } from './details.js';
+import { installTooltips, tileTip } from './tooltip.js';
 
 function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
@@ -72,6 +73,17 @@ export function mountMapLab(root) {
   root.append(topbar, h('div.main', boardWrap, sidebar));
 
   const board = new Board(canvas);
+
+  // Hover a tile for two seconds to see it magnified with its rules.
+  const tips = installTooltips((kind, args) => (kind === 'tile' ? tileTip(board.map, Number(args[0]), { reveal: state.reveal }) : null));
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.buttons || !board.map) return tips.hide();
+    const r = canvas.getBoundingClientRect();
+    const tile = board.tileAt({ x: (e.clientX - r.left) * board.dpr, y: (e.clientY - r.top) * board.dpr });
+    if (tile === null) return tips.hide();
+    return tips.hover(`tile:${tile}:${board.map.seed}:${board.map.attempt}`, () => tileTip(board.map, tile, { reveal: state.reveal }), e);
+  });
+  canvas.addEventListener('pointerleave', () => tips.hide());
   board.on('zoom', (s) => { zoomLabel.textContent = `${Math.round((s / board.fitScale()) * 100)}%`; });
 
   function show(map, { keepView = false } = {}) {
