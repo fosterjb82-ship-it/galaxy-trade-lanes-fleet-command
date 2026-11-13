@@ -229,10 +229,16 @@ test('pirate phase: pirates step toward the nearest freighter and attack it', ()
   const b = g.map.nodes.find((n) => n.type === 'empty' && hexDistance(n, a) === 1);
   const fr = spawn(g, 0, 'freighter', b.id);
   const pir = spawn(g, 'pirate', null, a.id);
+  // Rounds 1 and 2: pirates hold still.
+  g = endAll(g);
+  g = endAll(g);
+  assert.equal(ship(g, pir).tile, a.id, 'no pirate phase before round 3');
+  assert.equal(ship(g, fr).hull, 3);
+  assert.deepEqual(g.rounds[0].pirates, []);
   g = endAll(g);
   assert.equal(ship(g, pir).tile, b.id, 'moved onto the freighter');
   assert.equal(ship(g, fr).hull, 1, 'laser 2 vs freighter hull 3');
-  assert.ok(g.rounds[0].pirates.length >= 2);
+  assert.ok(g.rounds[2].pirates.length >= 2);
   g = endAll(g);
   assert.equal(ship(g, fr), undefined, 'destroyed next round');
   assert.equal(g.players[0].losses, 1);
@@ -289,4 +295,25 @@ test('tiebreak order is VP, then key planets, then ships on the board', () => {
   assert.equal(g.final.ranking[0].player, 1, 'more ships wins the tie');
   assert.equal(g.final.ranking[1].tiebreak, 'ships on the board');
   assert.equal(controllerOf(g, g.players[1].home), 1);
+});
+
+test('home defences hit enemy ships (and pirates) that end a move in a home', () => {
+  let g = newGame(2, 'HOMEDEF');
+  g.ships = g.ships.filter((s) => s.owner !== 'pirate');
+  const bo = g.map.nodes[g.players[1].home];
+  const next = g.map.nodes.find((n) => n.type !== 'void' && n.type !== 'asteroid' && hexDistance(n, bo) === 1 && !n.hidden);
+  const fighter = spawn(g, 0, 'fighter', next.id);
+  const frigate = spawn(g, 0, 'frigate', next.id);
+  g = act(g, { type: 'move', player: 0, card: giveCard(g, 0, 'move'), ship: fighter, tile: bo.id });
+  assert.equal(ship(g, fighter), undefined, 'a lone fighter (hull 2) is shot down');
+  assert.equal(g.players[0].losses, 1);
+  g = act(g, { type: 'move', player: 0, card: giveCard(g, 0, 'move'), ship: frigate, tile: bo.id });
+  assert.equal(ship(g, frigate).hull, 2, 'a frigate survives with 2 hull');
+  assert.equal(controllerOf(g, bo.id), 0, 'and takes the home');
+  // The owner's own ships are never hit.
+  const own = spawn(g, 1, 'fighter', next.id);
+  g.active = 1;
+  g = act(g, { type: 'move', player: 1, card: giveCard(g, 1, 'move'), ship: own, tile: bo.id });
+  assert.equal(ship(g, own).hull, 2);
+  cardLocations(g);
 });

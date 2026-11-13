@@ -87,7 +87,7 @@ test('deploy is rejected off-turn, off controlled tiles, and over CP capacity', 
   assert.throws(() => applyAction(g, { type: 'deploy', player: 0, card: fighterOf(0), tile: g.players[0].home }), /Command Points/);
 });
 
-test('control: only ships, highest total hull, ties mean nobody', () => {
+test('control: claim by presence, keep it after leaving, ties go to the holder', () => {
   let g = newGame();
   const key = g.map.nodes.find((n) => n.type === 'key' && !n.central).id;
   const give = (pid, def) => {
@@ -104,15 +104,30 @@ test('control: only ships, highest total hull, ties mean nobody', () => {
   assert.equal(cpCapacity(g, 0).total, 8, 'key planet adds 2 CP');
   assert.ok(deployTiles(g, 0).includes(key), 'can deploy at a controlled key planet');
 
+  // The fighter moves on: the planet stays Ada's.
+  const open = g.map.nodes.find((n) => n.type === 'empty' && !g.ships.some((x) => x.tile === n.id)).id;
+  g = applyAction(g, { type: 'dev.placeShip', ship: f0, tile: open });
+  assert.equal(controllerOf(g, key), 0, 'held after leaving');
+  assert.equal(cpCapacity(g, 0).total, 8);
+  assert.equal(controllerOf(g, open), 0, 'open space: presence');
+  g = applyAction(g, { type: 'dev.placeShip', ship: f0, tile: key });
+
   const f1 = give(1, 'ship-fighter'); // hull 2 -> tie
   g = applyAction(g, { type: 'dev.placeShip', ship: f1, tile: key });
-  assert.equal(controllerOf(g, key), null, 'tie means nobody');
-  assert.equal(cpCapacity(g, 0).total, 6);
+  assert.equal(controllerOf(g, key), 0, 'a tie leaves it with the holder');
 
   const fr1 = give(1, 'ship-frigate'); // +4 hull for player 1
   g = applyAction(g, { type: 'dev.placeShip', ship: fr1, tile: key });
-  assert.equal(controllerOf(g, key), 1);
+  assert.equal(controllerOf(g, key), 1, 'more hull takes it');
   assert.equal(cpCapacity(g, 1).total, 8);
+  assert.equal(cpCapacity(g, 0).total, 6);
+
+  // Everyone leaves: Bo keeps it.
+  for (const id of [f0, f1, fr1]) g = applyAction(g, { type: 'dev.placeShip', ship: id, tile: open });
+  assert.equal(controllerOf(g, key), 1);
+  assert.equal(controllerOf(g, open), 1, 'open space: presence (Bo has 6 hull to 2)');
+  g = applyAction(g, { type: 'dev.placeShip', ship: fr1, tile: g.players[1].home });
+  assert.equal(controllerOf(g, open), null, 'open space with tied hull: nobody');
 });
 
 test('an enemy alone in your home takes its control and CP', () => {
@@ -139,7 +154,10 @@ test('losing territory keeps ships but blocks new deploys until back under capac
   g = applyAction(g, { type: 'dev.placeShip', ship: d, tile: key }); // 8 CP
   deploy('ship-destroyer'); // 6 used of 8
   deploy('ship-fighter'); // 7 of 8
-  g = applyAction(g, { type: 'dev.placeShip', ship: d, tile: g.players[0].home }); // lose key: 6 cap, 7 used
+  // Bo takes the planet with more hull: Ada drops to 6 capacity with 7 in use.
+  g = applyAction(g, { type: 'dev.placeShip', ship: d, tile: g.players[0].home });
+  g.ships.push({ id: 'sBo', owner: 1, type: 'carrier', tile: key, hull: 8, upgrades: [] });
+  g = applyAction(g, { type: 'dev.giveCard', player: 1, def: 'move' });
   assert.equal(cpUsed(g, 0), 7);
   assert.equal(cpCapacity(g, 0).total, 6);
   assert.equal(shipsOf(g, 0).length, 3, 'no ships removed');

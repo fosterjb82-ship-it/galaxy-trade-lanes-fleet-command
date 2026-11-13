@@ -63,10 +63,10 @@ There is no build step: plain ES modules, no dependencies.
   - The card leaves your hand and stays with the ship until the ship is destroyed.
   - Ships are drawn on their tiles with hull badges, and each tile's details pane lists the ships on it.
 - **Control:**
-  - A player with the only ships on a tile controls it.
-  - When several players have ships there, the highest total hull wins; a tie means nobody controls it.
-  - An empty home stays with its owner.
-  - Pirates never control tiles, but they can stop others from controlling them.
+  - The player with the only ships on a tile, or the most total hull there, has the upper hand.
+  - Homes, key planets, stations, trade nodes and intersections are *held*: once you have the upper hand you keep them after your ships leave, through ties and while pirates sit there, until another player has the upper hand. Homes start held by their owners.
+  - Open space, asteroid fields and nebulas are only controlled while your ships are there.
+  - Pirates never control tiles.
   - Controlled tiles are outlined in the controller's colour.
 - **Command Points:** capacity comes from your home (6), each key planet (2) and each station (2). The sidebar shows a meter and where your capacity comes from. Deploying over capacity is refused with the reason. Losing territory never removes ships, but it blocks new deploys until you are back under capacity.
 
@@ -139,7 +139,7 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - Your sidebar shows their progress, which is private.
   - Immediate missions are revealed with a public announcement the moment they're done. End-of-game missions are revealed at final scoring.
   - Diplomat and Backstabber are left out of 2-player games.
-- **Pirate phase (end of each round):** each pirate fleet moves 1 tile toward the nearest freighter or blockade runner, then attacks a player ship on its tile, preferring traders.
+- **Pirate phase (end of each round, from round 3):** pirates hold still in rounds 1–2. After that, each pirate fleet moves 1 tile toward the nearest freighter or blockade runner, then attacks a player ship on its tile, preferring traders.
 - **Uncertain ending:**
   - After round 7 there is a 1 in 3 chance the game ends; after rounds 8 and 9, 1 in 2; round 10 always ends it.
   - The round summary shows the roll, with an "Imperial Ceasefire" alert when the war ends.
@@ -192,6 +192,15 @@ Images are cached by key, size and animation frame. Text, numbers, outlines and 
   - its status (ion-disabled, already fired), location and trade route;
   - every upgrade slot, filled with the fitted card or marked empty. On your turn, upgrades in your hand that fit can be fitted from there.
 
+### Opening balance
+
+Changes after playtesting, to soften the opening and stop early rushes:
+
+- **Held territory:** planets, stations, homes, trade nodes and intersections stay yours after your ships move on, until an enemy takes them. One fighter can claim tiles one after another instead of sitting on each.
+- **Pirates wait two rounds:** the pirate phase starts at the end of round 3, so early freighters aren't hunted straight away.
+- **Bigger maps:** one more ring of hexes at every player count. Radius 5 for 2 players, 6 for 3–4 players and 7 for 5–6 players. Homes sit 5–8 moves from the galactic core.
+- **Home defences:** any enemy ship (or pirate) that ends a move in someone's home sector takes 2 damage. A lone fighter is shot down, so taking a home needs a real fleet.
+
 ### Hover tooltips
 
 Rest the pointer on something for **2 seconds** to see a magnified picture with its details and the rules behind it. Moving off, clicking, scrolling or pressing a key hides it again.
@@ -203,7 +212,7 @@ Rest the pointer on something for **2 seconds** to see a magnified picture with 
 
 ## Rules decided where the design was silent or didn't fit the hex board
 
-- Control needs ships present (your empty home stays yours). Pirates block control but never hold it.
+- Holdable tiles (homes, planets, stations, trade nodes, intersections) stay with their holder until an enemy has the upper hand there; open space needs ships present. Pirates never hold tiles.
 - Ships stop when they enter a tile holding enemy ships or pirates.
 - Nebulas deal 1 damage on entry. Hidden tiles reveal when a ship ends its move on them.
 - Any 2 cards can be kept at the end of a turn. They form a hidden reserve, and only reaction cards in it can be played.

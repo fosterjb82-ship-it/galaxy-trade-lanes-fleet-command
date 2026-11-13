@@ -19,9 +19,10 @@ function adjFor(map) {
  * @param {object} state
  * @param {(state, shipId, opts) => void} destroyShip
  * @param {(name: string) => string} label  ship description for the log
+ * @param {(pirate) => boolean} onArrive  called after a move; false if the pirate was destroyed
  * @returns {string[]} events
  */
-export function piratePhase(state, destroyShip, label) {
+export function piratePhase(state, destroyShip, label, onArrive = () => true) {
   const events = [];
   const adj = adjFor(state.map);
   const pirates = state.ships.filter((s) => s.owner === 'pirate').map((s) => s.id);
@@ -40,6 +41,7 @@ export function piratePhase(state, destroyShip, label) {
           (state.fx ??= []).push({ kind: 'move', ship: pirate.id, path: [pirate.tile, step], nebulas: [] });
           pirate.tile = step;
           events.push(`A pirate fleet moves toward ${label(target)}.`);
+          if (!onArrive(pirate)) continue; // shot down by home defences
         }
       }
     }

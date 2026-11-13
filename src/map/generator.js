@@ -49,7 +49,7 @@ export function mapParams(players) {
   if (players < 2 || players > 6) throw new Error('Fleet Command supports 2–6 players');
   return {
     players,
-    radius: { 2: 4, 3: 5, 4: 5, 5: 6, 6: 6 }[players],
+    radius: { 2: 5, 3: 6, 4: 6, 5: 7, 6: 7 }[players],
     centralCount: players <= 4 ? 1 : players - 3, // 5p: 2, 6p: 3
     tradeCount: 2 * players + 1,
     chokeCount: players <= 4 ? 3 : 4,

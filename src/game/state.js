@@ -24,6 +24,13 @@ import { piratePhase } from './pirates.js';
 export const HAND_SIZE = 5;
 export const MAX_KEEP = 2;
 export const KEY_PLANET_VP = 2;
+
+/** Tiles whose control persists after your ships leave, until an enemy takes them. */
+export const HOLDABLE = new Set(['home', 'key', 'station', 'trade', 'intersection']);
+/** Damage an enemy ship takes when it ends a move in someone's home sector. */
+export const HOME_DEFENCE = 2;
+/** Pirates sit still for the opening rounds; the pirate phase starts this round. */
+export const PIRATE_START_ROUND = 3;
 export const AGREEMENT_VP = 1;
 
 /** Chance the game ends after each round (DESIGN.md "Uncertain ending"). */
@@ -196,21 +203,53 @@ export const shipsOf = (state, playerId) => state.ships.filter((s) => s.owner ==
 export const maxHull = (ship) => shipDef(ship).hull;
 
 /**
- * Who controls a tile: the only player with ships there, or the player with
- * the highest total hull. A tie (or pirates on top) means nobody. An empty
- * home sector stays with its owner.
+ * Who has the upper hand on a tile right now: the only player with ships
+ * there, or the player with the most total hull. A tie, pirates on top or an
+ * empty tile give null.
  */
-export function controllerOf(state, tileId) {
+export function presenceOf(state, tileId) {
   const here = shipsAt(state, tileId);
-  if (here.length === 0) {
-    const node = state.map.nodes[tileId];
-    return node.type === 'home' ? node.homeOf : null;
-  }
+  if (here.length === 0) return null;
   const hull = new Map();
   for (const s of here) hull.set(s.owner, (hull.get(s.owner) ?? 0) + s.hull);
   const ranked = [...hull.entries()].sort((a, b) => b[1] - a[1]);
   if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return null;
   return ranked[0][0] === 'pirate' ? null : ranked[0][0];
+}
+
+/** The stored holder of a holdable tile (homes start with their owner). */
+function heldBy(state, tileId) {
+  const stored = state.control?.[tileId];
+  if (stored !== undefined) return stored;
+  const node = state.map.nodes[tileId];
+  return node.type === 'home' ? node.homeOf : null;
+}
+
+/**
+ * Who controls a tile. Open space, asteroids and nebulas: whoever has the
+ * upper hand there now. Homes, key planets, stations, trade nodes and
+ * intersections are held: the holder keeps them after leaving, through ties
+ * and while pirates sit there, until another player has the upper hand.
+ */
+export function controllerOf(state, tileId) {
+  const now = presenceOf(state, tileId);
+  if (!HOLDABLE.has(state.map.nodes[tileId].type)) return now;
+  return now ?? heldBy(state, tileId);
+}
+
+/** Record who holds each holdable tile (run after every change on the board). */
+export function updateControl(state) {
+  state.control ??= {};
+  for (const n of state.map.nodes) {
+    if (!HOLDABLE.has(n.type)) continue;
+    const now = presenceOf(state, n.id);
+    if (now === null) continue;
+    const before = heldBy(state, n.id);
+    if (now !== before) {
+      state.control[n.id] = now;
+      if (n.name) log(state, `${state.players[now].name} takes control of ${n.name}.`);
+    }
+  }
 }
 
 /** Map of tileId -> controlling player for every controlled tile. */
@@ -387,6 +426,7 @@ export function destroyShip(state, shipId, { by = null, cause = '' } = {}) {
  * agreement; then the pirate phase; then the roll for the uncertain ending.
  */
 function endRound(state) {
+  updateControl(state);
   const control = controlMap(state);
   const scores = state.players.map((p) => {
     const keys = [...control].filter(([tile, owner]) => owner === p.id && state.map.nodes[tile].type === 'key').map(([t]) => t);
@@ -399,8 +439,11 @@ function endRound(state) {
   for (const sc of scores) {
     if (sc.vp) log(state, `${state.players[sc.player].name} scores ${sc.vp} VP (${sc.keys.length} key planet${sc.keys.length === 1 ? '' : 's'}, ${sc.agreements} agreement${sc.agreements === 1 ? '' : 's'}).`);
   }
-  const pirates = piratePhase(state, destroyShip, (sh) => shipLabel(state, sh));
+  const pirates = state.round >= PIRATE_START_ROUND
+    ? piratePhase(state, destroyShip, (sh) => shipLabel(state, sh), (sh) => homeDefence(state, sh, []))
+    : [];
   for (const e of pirates) log(state, e);
+  updateControl(state);
   checkMissions(state);
 
   // Uncertain ending.
@@ -563,6 +606,29 @@ export function reactionCheck(state, pendingInfo, cardUid) {
   return null;
 }
 
+/**
+ * Home defences: an enemy ship (or pirate) ending a move in someone's home
+ * sector takes HOME_DEFENCE damage. Returns false if the ship was destroyed.
+ */
+function homeDefence(state, ship, events) {
+  const node = state.map.nodes[ship.tile];
+  if (node.type !== 'home' || node.homeOf === ship.owner) return true;
+  const owner = state.players[node.homeOf];
+  fx(state, {
+    kind: 'shot', from: node.id, to: node.id, weapon: 'cannon', damage: HOME_DEFENCE, ion: false,
+    shooter: null, shooterOwner: node.homeOf, target: ship.id,
+  });
+  ship.hull -= HOME_DEFENCE;
+  events.push(`${owner.name}'s home defences hit ${shipLabel(state, ship)} for ${HOME_DEFENCE}.`);
+  log(state, `${owner.name}'s home defences hit ${shipLabel(state, ship)} for ${HOME_DEFENCE}.`);
+  if (ship.hull <= 0) {
+    destroyShip(state, ship.id, { cause: `by ${owner.name}'s home defences` });
+    events.push(`${shipLabel(state, ship)} was destroyed.`);
+    return false;
+  }
+  return true;
+}
+
 /** Enter a tile outside normal movement (retreat): nebula damage applies. */
 function enterTile(state, ship, tile, events) {
   fx(state, { kind: 'move', ship: ship.id, path: [ship.tile, tile], nebulas: state.map.nodes[tile].type === 'nebula' ? [1] : [] });
@@ -575,7 +641,7 @@ function enterTile(state, ship, tile, events) {
       return false;
     }
   }
-  return true;
+  return homeDefence(state, ship, events);
 }
 
 /** Fire one weapon from `shooter` at `target`. Returns the damage report. */
@@ -675,6 +741,7 @@ export function applyAction(prev, action) {
   state.notices = [];
   state.fx = [];
   handler(state, action);
+  updateControl(state);
   pruneRoutes(state, (t) => log(state, t));
   if (state.phase === 'action') checkMissions(state);
   return state;
@@ -820,6 +887,7 @@ const HANDLERS = {
       }
     }
     log(state, `${p.name} moved a ${shipDef(ship).name.toLowerCase()} to ${tileName(state, tile)}.`);
+    if (!homeDefence(state, ship, state.lastMove.events)) return;
     revealHidden(state, ship);
     checkAmbush(state, ship);
   },

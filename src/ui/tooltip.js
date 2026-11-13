@@ -128,15 +128,30 @@ export function missionTip(id, progress = null, state = null) {
 }
 
 const TILE_RULES = {
-  home: ['Starts controlled by its owner even when empty. An enemy alone there takes control, and its 6 CP.'],
-  key: ['Controlled by whoever has the only ships here, or the most total hull. A tie means nobody scores it.'],
-  station: ['Ships starting your turn here (while you control it) repair fully. Control any station to buy ship cards for 1 less.'],
-  trade: ['A freighter or blockade runner here can set up a trade route to another trade node within 8 jumps.'],
-  intersection: ['Many shortest paths run through here, so ships stopping on enemy tiles can block traffic.'],
+  home: [
+    'Home defences: any enemy ship (or pirate) that ends a move here takes 2 damage, so a lone fighter can\'t raid it.',
+    'An enemy that survives and has the upper hand here takes control, and its 6 CP, until you take it back.',
+  ],
+  key: [
+    'Claim it by having the only ships here, or the most total hull. It stays yours after your ships leave.',
+    'An enemy takes it only by having the upper hand here; a tie leaves it with the current holder.',
+  ],
+  station: [
+    'Held like a planet: it stays yours after you leave, until an enemy takes it.',
+    'Ships starting your turn here repair fully. Control any station to buy ship cards for 1 less.',
+  ],
+  trade: [
+    'Held like a planet once claimed.',
+    'A freighter or blockade runner here can set up a trade route to another trade node within 8 jumps.',
+  ],
+  intersection: [
+    'Held like a planet once claimed.',
+    'Many shortest paths run through here, so ships stopping on enemy tiles can block traffic.',
+  ],
+  empty: ['Open space is only controlled while your ships are on it.'],
   asteroid: ['Ships may stop here; it simply costs more to enter.'],
   nebula: ['The damage applies every time a ship enters, including mid-move and on a Retreat.'],
   void: ['Blocks movement, so it shapes the routes around it.'],
-  empty: [],
 };
 
 /**
@@ -193,7 +208,7 @@ export function shipTip(ship, o) {
     o.upgrades.length > 0 && h('ul.tip-rules', o.upgrades.map((u) => h('li', h('b', u.name), ` · ${u.text}`))),
     o.status.length > 0 && h('p.tip-note', o.status.join(' ')),
     rules(pirate
-      ? ['Neutral. At the end of each round it moves 1 tile toward the nearest freighter or blockade runner, then attacks a ship on its tile.', 'Destroying it scores 1 VP.']
+      ? ['Neutral. Pirates hold still in rounds 1–2. From round 3, at the end of each round it moves 1 tile toward the nearest freighter or blockade runner, then attacks a ship on its tile.', 'Destroying it scores 1 VP. Home defences fire on pirates too.']
       : ['Damage stays until repaired: Repair cards, a station you control (full), or your carrier\'s tile (+2) at the start of your turn.']),
     h('p.tip-hint', 'Click the ship for full details and upgrade slots.'),
   ];

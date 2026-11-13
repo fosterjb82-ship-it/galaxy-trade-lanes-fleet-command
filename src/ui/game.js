@@ -528,7 +528,7 @@ export function mountGame(root) {
       node.revealed && h('div.callout', h('b', 'Revealed'), h('span', `This hidden tile held a ${found[node.hiddenContent]}.`)),
       ships.length > 0 && h('h3', `Ships here (${ships.length})`),
       ships.length > 0 && h('ul.ship-list', ships.map(shipRow)),
-      ships.length > 1 && h('p.muted.small', 'Control goes to the player with the highest total hull here; a tie means nobody controls it.'),
+      ships.length > 1 && h('p.muted.small', 'The player with the most total hull here has the upper hand. Planets, stations, homes, trade nodes and intersections stay with their holder through ties and after ships leave.'),
     ].filter(Boolean);
     details.replaceChildren(...tileDetails({
       map: shown, id: tile, costs, reveal: false, pirates,
@@ -628,6 +628,7 @@ export function mountGame(root) {
             h('td', h('b', p.vp)));
         }))),
       h('p.muted.small', 'Key planets score 2 VP each and active trade agreements 1 VP each, every round.'),
+      rs.round < 3 && h('p.muted.small', rs.round === 2 ? 'Pirates start moving and attacking at the end of round 3.' : 'Pirates hold still in rounds 1 and 2.'),
       rs.pirates?.length > 0 && h('div',
         h('h3.section', 'Pirate phase'),
         combatLines(rs.pirates)),
