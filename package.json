@@ -1,0 +1,11 @@
+{
+  "name": "galaxy-trade-lanes-fleet-command",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Hot-seat browser prototype of Galaxy Trade Lanes: Fleet Command",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "test": "node --test tests/*.test.js"
+  }
+}
