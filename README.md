@@ -11,6 +11,20 @@ npm test         # runs the logic tests (Node 20+, no dependencies)
 
 There is no build step: plain ES modules, no dependencies.
 
+### Play it on GitHub Pages
+
+The repo is set up to publish itself to GitHub Pages
+(`.github/workflows/pages.yml`). Every push to `main` runs the tests and, if
+they pass, deploys `index.html`, `styles.css` and `src/` to
+`https://<owner>.github.io/galaxy-trade-lanes-fleet-command/`.
+
+One-time setup: **Settings → Pages → Build and deployment → Source: GitHub
+Actions**. To redeploy without a push, run the workflow by hand from the
+Actions tab.
+
+All paths in the game are relative, so it works from the repo's subfolder.
+Saved games live in the browser's local storage, per browser.
+
 ## Build stages
 
 | Stage | Scope | Status |
