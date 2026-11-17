@@ -876,3 +876,34 @@ ul.missions li canvas.art { border-radius: 6px; width: 100% !important; height: 
 .tip-hint { margin: 0; color: var(--muted); font-size: 11px; font-style: italic; }
 body.still .tip { transition: none; }
 @media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
+
+/* ---------------------------------------------------------------- sound */
+
+.sound-menu { position: relative; z-index: 70; } /* stays usable above dialogs */
+.sound-btn { white-space: nowrap; }
+.sound-btn.off { color: var(--muted); }
+.sound-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 240px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+}
+.sound-menu.open .sound-panel { display: flex; }
+.sound-panel .muted.small { margin: 0; }
+.topbar .sound-panel label, .sound-row { color: var(--text, #e6ebff); font-size: 13px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.sound-row.master { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.sound-group { display: flex; flex-direction: column; gap: 6px; }
+.sound-slider { display: flex; align-items: center; gap: 8px; padding-left: 24px; }
+.sound-slider input[type="range"] { flex: 1; accent-color: var(--accent); }
+.sound-slider input:disabled { opacity: 0.4; }
+.sound-slider .pct { width: 36px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.setup-sound { position: fixed; top: 14px; right: 16px; z-index: 70; }

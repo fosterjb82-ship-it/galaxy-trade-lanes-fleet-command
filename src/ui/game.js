@@ -14,7 +14,7 @@ import {
   upgradeCheck, END_ODDS_LABEL, END_CHANCE,
 } from '../game/state.js';
 import {
-  routeOptions, routesOf, blockaded, routeIncome, activeAgreements, agreementBetween, offerCheck, isTrader, BREAK_BONUS,
+  routeOptions, isRouteEnd, routesOf, blockaded, routeIncome, activeAgreements, agreementBetween, offerCheck, isTrader, BREAK_BONUS,
 } from '../game/trade.js';
 import { MISSIONS, missionProgressText } from '../game/missions.js';
 import { attackOptions, describeDamage, shipStats } from '../game/combat.js';
@@ -23,6 +23,8 @@ import { cardFace, cardLarge } from './card.js';
 import { installTooltips, cardTip, missionTip, tileTip, shipTip } from './tooltip.js';
 import { tileDetails, tileTitle, row } from './details.js';
 import { loadGame, saveGame, clearGame } from './storage.js';
+import { soundMenu } from './soundmenu.js';
+import { sound } from '../audio/sound.js';
 
 const board0Animate = () => {
   try {
@@ -32,6 +34,11 @@ const board0Animate = () => {
   return !(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 };
 const TYPE_WORD = { ship: 'Ship', command: 'Command', credit: 'Credit', upgrade: 'Upgrade', reaction: 'Reaction', utility: 'Utility' };
+// Sound cues for actions whose effects don't already make a sound.
+const ACTION_SOUND = {
+  buy: 'buy', playCredit: 'income', playUpgrade: 'card', scrap: 'card', repair: 'card', react: 'card',
+  move: 'card', attack: 'card', deploy: 'card', establishRoute: 'income', chooseMissions: 'card', breakAgreement: 'income',
+};
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const CP_LABEL = { home: 'Home sector', key: 'Key planet', station: 'Station' };
 
@@ -63,6 +70,7 @@ export function mountGame(root) {
         type: 'checkbox', checked: board0Animate(),
         onchange: (e) => { setAnimationsEnabled(e.target.checked); board.setAnimate(e.target.checked); document.body.classList.toggle('still', !e.target.checked); },
       }), 'Animations'),
+    soundMenu(),
     h('a.button', { href: `#lab&seed=${encodeURIComponent(state.mapSeed)}&players=${state.players.length}` }, 'Map Lab'),
     h('button', {
       onclick: () => askConfirm('Start a new game?', 'This game will be abandoned and cannot be resumed.', 'Abandon and start new', () => {
@@ -129,6 +137,7 @@ export function mountGame(root) {
   function say(text, kind = 'info') {
     toast.textContent = text;
     toast.className = `game-toast show ${kind}`;
+    if (kind === 'error') sound.sfx('error');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
   }
@@ -138,6 +147,8 @@ export function mountGame(root) {
       const prev = state;
       state = applyAction(state, action);
       saveGame(state);
+      const cue = ACTION_SOUND[action.type];
+      if (cue) sound.sfx(cue);
       const events = state.fx ?? [];
       fxp.play(events.filter((e) => !e.start), prev, state);
       startFx = events.filter((e) => e.start);
@@ -391,8 +402,8 @@ export function mountGame(root) {
         if (state.pending) fxp.whenIdle(defenderHandoff);
         else {
           const s = state.ships.find((x) => x.id === ship);
-          if (s && isTrader(s) && state.map.nodes[s.tile].type === 'trade' && !state.routes.some((r) => r.ship === s.id)) {
-            say(`Your ${SHIPS[s.type].name.toLowerCase()} is on a trade node: set up a trade route from the Trade panel.`);
+          if (s && isTrader(s) && routeOptions(state, s).length && !state.routes.some((r) => r.ship === s.id)) {
+            say(`Your ${SHIPS[s.type].name.toLowerCase()} can start a trade route here: set one up from the Trade panel.`);
           }
         }
       }
@@ -609,6 +620,7 @@ export function mountGame(root) {
   }
 
   function roundSummary(rs) {
+    sound.sfx('round');
     const ranked = [...state.players].sort((a, b) => b.vp - a.vp);
     const end = rs.ending ?? { chance: 0 };
     const over = state.phase === 'over';
@@ -646,6 +658,7 @@ export function mountGame(root) {
 
   function finalScreen() {
     concealed = false;
+    sound.sfx('victory');
     const f = state.final;
     const rows = f.ranking.map((r) => {
       const p = state.players[r.player];
@@ -681,6 +694,7 @@ export function mountGame(root) {
 
   /** Public announcement of completed missions. */
   function announce(notices) {
+    sound.sfx('mission');
     if (overlay.classList.contains('show')) return say(notices.map((n) => n.text).join(' '));
     showOverlay([
       h('div.kicker', 'Secret mission revealed'),
@@ -879,6 +893,7 @@ export function mountGame(root) {
     render();
     const p = me();
     const c = PLAYER_COLORS[p.id];
+    sound.sfx('turn');
     showOverlay([
       h('div.handoff',
         spriteIcon(`home:${p.id}`, 64),
@@ -1109,7 +1124,7 @@ export function mountGame(root) {
 
   function tradePanel(p) {
     const mine = routesOf(state, p.id);
-    const traders = shipsOf(state, p.id).filter((s) => isTrader(s) && state.map.nodes[s.tile].type === 'trade');
+    const traders = shipsOf(state, p.id).filter((s) => isTrader(s) && routeOptions(state, s).length);
     const deals = state.agreements.filter((a) => a.a === p.id || a.b === p.id);
     const others = state.players.filter((o) => o.id !== p.id);
     return h('div.trade',
@@ -1120,7 +1135,7 @@ export function mountGame(root) {
             h('span', r.label), h('span.muted.small', plural(r.length, 'jump')),
             h(`b.small${blocked ? '.warn' : ''}`, blocked ? 'blockaded' : `+${routeIncome(state, r)}/turn`));
         }))
-        : h('p.muted.small', 'No trade routes. Move a freighter or blockade runner onto a trade node to set one up.'),
+        : h('p.muted.small', 'No trade routes. Move a freighter or blockade runner onto a trade node or planet to set one up (one end must be a trade node).'),
       ...traders.map((s) => {
         const opts = routeOptions(state, s);
         const sel = h('select', { 'aria-label': 'Route destination' }, opts.map((o) => h('option', { value: o.to },

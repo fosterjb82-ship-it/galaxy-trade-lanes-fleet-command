@@ -73,7 +73,7 @@ Saved games live in the browser's local storage, per browser.
   - Everyone draws 5 cards, and the Fighter is always in the opening hand.
   - When a deck runs out, the discard pile is shuffled to form a new one.
 - **Ships on the board:**
-  - Playing a Ship card highlights every tile where you may deploy: tiles you control, plus your carrier's tile. Click one to deploy.
+  - Playing a Ship card highlights every tile where you may deploy: planets and stations you control, plus your carrier's tile. Click one to deploy.
   - The card leaves your hand and stays with the ship until the ship is destroyed.
   - Ships are drawn on their tiles with hull badges, and each tile's details pane lists the ships on it.
 - **Control:**
@@ -140,7 +140,7 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - Each uses a slot, duplicates aren't allowed, and some are restricted to certain ships (Heavy Cannon, Cargo Pod, Laser Battery).
   - Effects feed straight into movement and the combat preview. Upgrades return to the discard pile with a destroyed ship.
 - **Trade routes:**
-  - A freighter or blockade runner on a trade node can set up a route to another trade node up to 8 jumps away, along the shortest open path. The route is drawn on the board in your colour.
+  - A freighter or blockade runner on a trade node or planet (home or key planet) can set up a route up to 8 jumps away, along the shortest open path. One end must be a trade node: trade node to trade node, or trade node to planet. The route is drawn on the board in your colour.
   - The ship must stay on the route's path, or the route closes.
   - Income arrives at the start of your turn: +1, or +2 for routes of 3+ jumps, and +1 more with a Cargo Pod.
   - Any enemy ship or pirate on the path is a blockade, and that route pays nothing.
@@ -217,12 +217,24 @@ Changes after playtesting, to soften the opening and stop early rushes:
 
 ### Hover tooltips
 
-Rest the pointer on something for **2 seconds** to see a magnified picture with its details and the rules behind it. Moving off, clicking, scrolling or pressing a key hides it again.
+Rest the pointer on something for **1 second** to see a magnified picture with its details and the rules behind it. Moving off, clicking, scrolling or pressing a key hides it again.
 
 - **Cards** (hand, table, dialogs, upgrade slots): illustration, cost, type, ship stats, restrictions, and how the card works in play (damage maths, reaction timing, slot rules…).
 - **Missions:** illustration, VP, timing, how scoring works, and your progress if it is one of yours.
 - **Tiles** (board, Map Lab, neighbour lists, CP sources): movement cost, CP and VP value, who controls it, ships present, hidden-tile and terrain rules.
 - **Ships** (board, ship lists, fleet list): artwork, hull, speed, weapons, shields, armor, CP, fitted upgrades, status and repair rules (pirate behaviour for pirate fleets).
+
+### Playtest fixes and sound
+
+- **Intersection tolls:** each lane intersection you control pays +1 credit at the start of your turn (DESIGN.md's optional toll). The start-of-turn message lists it, and a "+1 cr" floats over each intersection.
+- **Trade routes to planets:** routes can now run from a trade node to a home or key planet, as well as between trade nodes.
+- **Deploying:** ships deploy only at planets (your home, key planets) and stations you control, plus at your carriers. Trade nodes, intersections and open space are no longer deploy points.
+- **Tooltips** appear after 1 second.
+- **Music and sound effects**, generated live with the Web Audio API (no audio files):
+  - slow generative ambient music: pads, sub bass, a sparse echoing arpeggio and distant bells, cycling through three chord progressions;
+  - effects for engines, each weapon (laser, cannon, missile, ion), hits and shields, explosions, warp-ins, repairs, reveals, income, buying and playing cards, turn handoffs, round scoring, missions, victory, errors and button clicks.
+  - The **🔊 Sound** button (top bar, and top-right of the setup screen) turns sound on or off and sets music and effects volume separately. It stays usable over dialogs, and the settings are remembered.
+  - Browsers only allow audio after you interact with the page, so the music starts on your first click.
 
 ## Rules decided where the design was silent or didn't fit the hex board
 
@@ -232,7 +244,7 @@ Rest the pointer on something for **2 seconds** to see a magnified picture with 
 - Any 2 cards can be kept at the end of a turn. They form a hidden reserve, and only reaction cards in it can be played.
 - Each ship fires once per turn. Pirate kills score 1 VP. Cannons ignore 2 shield points.
 - Reaction prompts only appear when the defender holds reserve cards (the count is public).
-- Trade routes are paths between two trade nodes that the trader ship must stay on. Agreements need both players to run a route.
+- Trade routes are paths from a trade node to another trade node or a planet, and the trader ship must stay on them. Agreements need both players to run a route.
 - Defenders get no reaction prompt against pirate attacks, because the pirate phase runs automatically.
 
 ## Layout
@@ -256,6 +268,7 @@ src/game/missions.js    the 18 secret missions and their progress
 src/game/pirates.js     end-of-round pirate phase
 src/render/units.js     ships, control outlines and deploy targets on the board
 src/render/fx.js        effects player: moves, shots, explosions, warp-ins, floating numbers
-src/ui/                 screens: setup, game, Map Lab; cards; details pane; hover tooltips
+src/audio/sound.js      synthesised music and sound effects, volume settings
+src/ui/                 screens: setup, game, Map Lab; cards; details pane; hover tooltips; sound menu
 tests/                  node --test suites
 ```

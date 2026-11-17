@@ -2,6 +2,7 @@
 // every fairness check, inspect rejected candidates, zoom the board and click
 // any tile for a details pane.
 
+import { soundMenu } from './soundmenu.js';
 import { generateMap, generateCandidate, mapParams, allCosts } from '../map/generator.js';
 import { randomSeed } from '../rng.js';
 import { Board } from '../render/board.js';
@@ -43,6 +44,7 @@ export function mountMapLab(root) {
 
   const topbar = h('header.topbar',
     h('div.brand', h('h1', 'Fleet Command'), h('span.stage', 'Map Lab')),
+    soundMenu(),
     h('label', 'Seed', seedInput),
     h('label', playersSelect),
     h('button.primary', { onclick: generate }, 'Generate'),
@@ -74,7 +76,7 @@ export function mountMapLab(root) {
 
   const board = new Board(canvas);
 
-  // Hover a tile for two seconds to see it magnified with its rules.
+  // Hover a tile for a second to see it magnified with its rules.
   const tips = installTooltips((kind, args) => (kind === 'tile' ? tileTip(board.map, Number(args[0]), { reveal: state.reveal }) : null));
   canvas.addEventListener('pointermove', (e) => {
     if (e.buttons || !board.map) return tips.hide();

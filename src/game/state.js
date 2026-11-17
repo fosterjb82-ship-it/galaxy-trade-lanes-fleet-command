@@ -15,7 +15,7 @@ import {
 } from './combat.js';
 import { neighbors, key as hexKey } from '../map/hex.js';
 import {
-  routeOptions, pruneRoutes, blockaded, routeIncome, routesOf, activeAgreements, agreementBetween, offerCheck,
+  routeOptions, pruneRoutes, isRouteEnd, blockaded, routeIncome, routesOf, activeAgreements, agreementBetween, offerCheck,
   isTrader, BREAK_BONUS,
 } from './trade.js';
 import { MISSIONS, missionDone, missionPool } from './missions.js';
@@ -277,13 +277,28 @@ export function cpUsed(state, playerId) {
   return shipsOf(state, playerId).reduce((s, ship) => s + shipDef(ship).cp, 0);
 }
 
-/** Tiles where this player may deploy: tiles they control, plus carrier tiles. */
+/** Tile types ships can be deployed at, when you control them. */
+export const DEPLOY_TYPES = new Set(['home', 'key', 'station']);
+
+/** Tiles where this player may deploy: controlled planets and stations, plus carrier tiles. */
 export function deployTiles(state, playerId) {
   const tiles = new Set();
-  for (const [tile, owner] of controlMap(state)) if (owner === playerId) tiles.add(tile);
+  for (const [tile, owner] of controlMap(state)) {
+    if (owner === playerId && DEPLOY_TYPES.has(state.map.nodes[tile].type)) tiles.add(tile);
+  }
   for (const s of shipsOf(state, playerId)) if (SHIPS[s.type]?.deployPoint) tiles.add(s.tile);
   return [...tiles].filter((t) => state.map.nodes[t].type !== 'void');
 }
+
+/** Lane intersections this player controls: each pays a toll of +1 credit per turn. */
+export function tollTiles(state, playerId) {
+  const out = [];
+  for (const [tile, owner] of controlMap(state)) {
+    if (owner === playerId && state.map.nodes[tile].type === 'intersection') out.push(tile);
+  }
+  return out;
+}
+export const TOLL = 1;
 
 /** Can this player play this Ship card right now? */
 export function deployCheck(state, playerId, cardUid) {
@@ -300,7 +315,7 @@ export function deployCheck(state, playerId, cardUid) {
     return { ok: false, reason: `Not enough Command Points: ${used} of ${cap} in use and a ${SHIPS[def.ship].name.toLowerCase()} needs ${need}.` };
   }
   const tiles = deployTiles(state, playerId);
-  if (tiles.length === 0) return { ok: false, reason: 'You control no tile to deploy at.' };
+  if (tiles.length === 0) return { ok: false, reason: 'You control no planet or station to deploy at.' };
   return { ok: true, tiles, cp: need };
 }
 
@@ -378,6 +393,13 @@ function startTurn(state) {
     p.credits += income;
     fx(state, { kind: 'income', tile: p.home, amount: income, owner: p.id, start: true });
     events.push(`Trade income: +${income} credit${income === 1 ? '' : 's'}${deals ? ` (incl. ${deals} from agreements)` : ''}.`);
+  }
+  // Intersection tolls: +1 credit per controlled lane intersection.
+  const tolls = tollTiles(state, p.id);
+  if (tolls.length) {
+    p.credits += tolls.length * TOLL;
+    for (const t of tolls) fx(state, { kind: 'income', tile: t, amount: TOLL, owner: p.id, start: true });
+    events.push(`Intersection tolls: +${tolls.length * TOLL} credit${tolls.length * TOLL === 1 ? '' : 's'} from ${tolls.length} intersection${tolls.length === 1 ? '' : 's'}.`);
   }
   // Deep Strike: a ship that ended your last turn in an enemy home and is still there.
   if (p.deepStrikeShips.some((id) => {
@@ -751,7 +773,7 @@ const HANDLERS = {
   deploy(state, { player, card, tile }) {
     const check = deployCheck(state, player, card);
     if (!check.ok) throw new GameError(check.reason);
-    if (!check.tiles.includes(tile)) throw new GameError('You can only deploy at a tile you control (or your carrier\'s tile).');
+    if (!check.tiles.includes(tile)) throw new GameError('You can only deploy at a planet or station you control (or your carrier\'s tile).');
     const p = state.players[player];
     const def = cardDef(state.cards[card]);
     p.hand.splice(p.hand.indexOf(card), 1);
@@ -816,7 +838,7 @@ const HANDLERS = {
     const ship = shipById(state, shipId);
     if (!ship || ship.owner !== player || !isTrader(ship)) throw new GameError('Only your freighters and blockade runners run trade routes.');
     const opt = routeOptions(state, ship).find((r) => r.to === to);
-    if (!opt) throw new GameError('Choose another trade node within range (your ship must be on a trade node).');
+    if (!opt) throw new GameError('Choose a destination in range. Your ship must be on a trade node or planet, and one end of the route must be a trade node.');
     state.routes = state.routes.filter((r) => r.ship !== shipId);
     const label = `${tileName(state, ship.tile)} – ${tileName(state, to)}`;
     state.routes.push({ id: `r${state.nextId++}`, owner: player, ship: shipId, a: ship.tile, b: to, path: opt.path, length: opt.length, label });

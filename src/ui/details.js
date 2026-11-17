@@ -19,10 +19,10 @@ export const TYPE_LABEL = {
 
 export const TYPE_EFFECT = {
   home: 'Starting point. Deploy ships here. Home defences deal 2 damage to any enemy ship that ends a move here.',
-  key: 'Worth 2 VP to its controller at the end of every round. Once claimed, it stays yours until an enemy takes it.',
-  intersection: 'A choke point many routes pass through. Controlling it can pay a toll of +1 credit per turn.',
+  key: 'Worth 2 VP to its controller at the end of every round, and a place to deploy ships. Once claimed, it stays yours until an enemy takes it.',
+  intersection: 'A choke point many routes pass through. Pays its controller a toll of +1 credit at the start of each turn.',
   station: 'Deploy ships here. Ships cost 1 less while you control a station. Ships starting a turn here fully repair.',
-  trade: 'Endpoint for trade routes between players.',
+  trade: 'Endpoint for trade routes. Routes run from a trade node to another trade node or to a planet.',
   empty: 'Plain space. Nothing here.',
   asteroid: 'Rocky and slow: entering costs 2 movement.',
   nebula: 'Ionised gas: a ship entering takes 1 damage.',
