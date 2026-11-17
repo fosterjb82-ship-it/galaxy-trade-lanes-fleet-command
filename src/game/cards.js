@@ -110,7 +110,7 @@ for (const [id, [name, cost, kind, text, rules]] of Object.entries(UPGRADES)) {
 for (const [id, s] of Object.entries(SHIPS)) {
   CARDS[`ship-${id}`] = {
     name: s.name, type: CARD_TYPE.SHIP, cost: s.cost, ship: id, icon: `ship:${id}`,
-    text: `Deploy a ${s.name.toLowerCase()} at a tile you control.`,
+    text: `Deploy a ${s.name.toLowerCase()} at a planet or station you control.`,
   };
 }
 

@@ -8,6 +8,7 @@
 
 import { art, PLAYER_COLORS, PIRATE_COLOR, ART_SIZE } from './sprites.js';
 import { slotOffset } from './units.js';
+import { sound } from '../audio/sound.js';
 
 const STEP_MS = 150; // per tile of movement
 const SHOT_MS = { laser: 170, cannon: 280, missile: 420, ion: 240 };
@@ -78,7 +79,12 @@ export class FxPlayer {
    * @param {object} next      state after the action
    */
   play(events, prev, next) {
-    if (!this.board.animate || !events?.length) return;
+    if (!events?.length) return;
+    if (!this.board.animate) {
+      // No animation: still play the sounds, quickly one after another.
+      events.slice(0, 8).forEach((e, i) => setTimeout(() => this.sound(e), i * 140));
+      return;
+    }
     const now = performance.now();
     let t = Math.max(now, this.endAt) + 40;
     const map = next.map;
@@ -130,6 +136,7 @@ export class FxPlayer {
           this.text(at, pts[step], '−1', '#ff9a7a');
           this.flash(e.ship, at);
         }
+        this.at(start, () => sound.sfx('move', { duration: dur / 1000 }));
         // Ghost of a ship that dies on the way follows the same path.
         const g = this.ghosts.find((x) => x.id === e.ship);
         if (g) g.follow = (n) => this.position(e.ship, n);
@@ -144,6 +151,8 @@ export class FxPlayer {
         const hit = start + dur;
         this.add(hit, hit + 260, (b, n, k) => this.drawImpact(b, to, k, e.weapon));
         this.flash(e.target, hit);
+        this.at(start, () => this.sound(e));
+        this.at(hit, () => sound.sfx(e.damage > 0 || e.ion ? 'impact' : 'shield'));
         if (e.ion) this.text(hit, to, 'ION', '#d6b3ff');
         else this.text(hit, to, e.damage > 0 ? `−${e.damage}` : '0', e.damage > 0 ? '#ff6b5e' : '#aeb8d8');
         this.at(hit, () => this.board.shakeFor(e.weapon === 'cannon' ? 170 : 90, e.weapon === 'cannon' ? 1 : 0.6));
@@ -154,30 +163,40 @@ export class FxPlayer {
         if (g) g.until = start + 90;
         const seed = (start | 0) ^ 0x51ed;
         this.add(start, start + 700, (b, n, k) => this.drawExplosion(b, pos, k, seed));
-        this.at(start, () => this.board.shakeFor(220, 1.5));
+        this.at(start, () => { this.board.shakeFor(220, 1.5); sound.sfx('explode'); });
         t = start + 380;
       } else if (e.kind === 'deploy') {
         const pos = slotPos(e.ship);
         this.hiddenUntil.set(e.ship, start + 230);
         this.add(start, start + 520, (b, n, k) => this.drawWarp(b, pos, k, PLAYER_COLORS[e.owner].light));
+        this.at(start, () => sound.sfx('deploy'));
         t = start + 260;
       } else if (e.kind === 'repair') {
         const pos = slotPos(e.ship);
         this.add(start, start + 800, (b, n, k) => this.drawRepair(b, pos, k, start | 0));
         this.text(start, pos, `+${e.amount}`, '#6dffa8');
+        this.at(start, () => sound.sfx('repair'));
         t = start + 180;
       } else if (e.kind === 'reveal') {
         const c = center(e.tile);
         if (e.spawned) this.hiddenUntil.set(e.spawned, start + 300);
         this.add(start, start + 700, (b, n, k) => this.drawReveal(b, c, k, start | 0));
+        this.at(start, () => sound.sfx('reveal'));
         t = start + 320;
       } else if (e.kind === 'income') {
         const c = center(e.tile);
         this.text(start, { x: c.x, y: c.y - 4 }, `+${e.amount} cr`, '#ffd166', 1300);
+        this.at(start, () => sound.sfx('income'));
       }
     }
     this.endAt = Math.max(this.endAt, t + 200, ...this.items.map((i) => i.end));
     this.board.invalidate();
+  }
+
+  /** The sound for one event (used directly when animations are off). */
+  sound(e) {
+    const name = { shot: e.weapon, explode: 'explode', deploy: 'deploy', repair: 'repair', reveal: 'reveal', income: 'income', move: 'move' }[e.kind];
+    if (name) sound.sfx(name, e.kind === 'move' ? { duration: (e.path.length - 1) * STEP_MS / 1000 } : {});
   }
 
   add(start, end, draw) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGame, applyAction, cardLocations, controllerOf, turnOrder } from '../src/game/state.js';
+import { createGame, applyAction, cardLocations, controllerOf, turnOrder, deployTiles } from '../src/game/state.js';
 import { shipStats, attackOptions } from '../src/game/combat.js';
 import { routeOptions } from '../src/game/trade.js';
 import { MISSIONS } from '../src/game/missions.js';
@@ -316,4 +316,59 @@ test('home defences hit enemy ships (and pirates) that end a move in a home', ()
   g = act(g, { type: 'move', player: 1, card: giveCard(g, 1, 'move'), ship: own, tile: bo.id });
   assert.equal(ship(g, own).hull, 2);
   cardLocations(g);
+});
+
+test('trade routes run between trade nodes and planets, but not planet to planet', () => {
+  let { g, tn } = tradeSetup('S5-PLANET');
+  const fromTrade = routeOptions(g, ship(g, spawn(g, 0, 'freighter', tn[0].id)));
+  const types = new Set(fromTrade.map((o) => g.map.nodes[o.to].type));
+  assert.ok(types.has('trade'), 'trade to trade');
+  assert.ok(types.has('key') || types.has('home'), 'trade to planet');
+  for (const t of types) assert.ok(['trade', 'key', 'home'].includes(t));
+
+  // From a key planet: only trade nodes are offered, and a route can be set up.
+  const key = g.map.nodes.find((n) => n.type === 'key' && !n.central);
+  const fr = spawn(g, 0, 'freighter', key.id);
+  const opts = routeOptions(g, ship(g, fr));
+  assert.ok(opts.length > 0);
+  assert.ok(opts.every((o) => g.map.nodes[o.to].type === 'trade'), 'planet to planet is not a route');
+  g = act(g, { type: 'establishRoute', player: 0, ship: fr, to: opts[0].to });
+  assert.equal(g.routes.at(-1).a, key.id);
+
+  // Open space is not a route end.
+  assert.equal(routeOptions(g, ship(g, spawn(g, 0, 'freighter', empty(g)[0].id))).length, 0);
+});
+
+test('lane intersections pay their controller +1 credit per turn', () => {
+  let g = newGame(2, 'S5-TOLL');
+  g.ships = g.ships.filter((s) => s.owner !== 'pirate');
+  const xs = g.map.nodes.filter((n) => n.type === 'intersection').slice(0, 2);
+  assert.equal(xs.length, 2);
+  const f = spawn(g, 0, 'fighter', xs[0].id);
+  g = act(g, { type: 'dev.placeShip', ship: f, tile: xs[0].id });
+  g = act(g, { type: 'dev.placeShip', ship: f, tile: xs[1].id }); // claims both: held after leaving
+  assert.equal(controllerOf(g, xs[0].id), 0);
+  assert.equal(controllerOf(g, xs[1].id), 0);
+  while (g.active !== 0 || g.round === 1) g = act(g, { type: 'endTurn', player: g.active });
+  assert.equal(g.players[0].credits, 2);
+  assert.ok(g.log.some((l) => /Intersection tolls: \+2/.test(l.text ?? l)));
+});
+
+test('ships deploy only at controlled planets and stations (and carriers)', () => {
+  let g = newGame(2, 'S5-DEPLOY');
+  const p = g.players[0];
+  const x = g.map.nodes.find((n) => n.type === 'intersection');
+  const tn = g.map.nodes.find((n) => n.type === 'trade');
+  const st = g.map.nodes.find((n) => n.type === 'station');
+  const key = g.map.nodes.find((n) => n.type === 'key' && !n.central);
+  const open = empty(g)[0];
+  for (const t of [x, tn, st, key, open]) spawn(g, 0, 'fighter', t.id);
+  g = act(g, { type: 'dev.setActive', player: 0 });
+  const card = p.hand.find((u) => g.cards[u].def === 'ship-fighter') ?? giveCard(g, 0, 'ship-fighter');
+  const allowed = new Set(deployTiles(g, 0));
+  assert.ok(allowed.has(p.home) && allowed.has(st.id) && allowed.has(key.id));
+  assert.ok(!allowed.has(x.id) && !allowed.has(tn.id) && !allowed.has(open.id));
+  assert.throws(() => act(g, { type: 'deploy', player: 0, card, tile: open.id }), /planet or station/);
+  spawn(g, 0, 'carrier', open.id);
+  assert.ok(deployTiles(g, 0).includes(open.id), 'a carrier is still a deploy point');
 });

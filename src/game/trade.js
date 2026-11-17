@@ -1,7 +1,8 @@
 // Trade routes and trade agreements (DESIGN.md "Trade and economy").
 //
 // Hex-board reading of the rules: a freighter or blockade runner standing on
-// a trade node can set up a route to another trade node. The route is the
+// a trade node or a planet (home or key planet) can set up a route to another
+// trade node or planet, as long as at least one end is a trade node. The route is the
 // shortest open path between them, and the ship must stay somewhere on that
 // path to keep it running. Each of the owner's turns it pays +1 credit
 // (+2 for a route of 3+ jumps, +1 more with a Cargo Pod), unless an enemy
@@ -28,12 +29,17 @@ function adjFor(map) {
 
 export const isTrader = (ship) => ship.owner !== 'pirate' && Boolean(SHIPS[ship.type]?.trader);
 
-/** Possible routes for a trader standing on a trade node. */
+/** Tile types a trade route can start or end on. */
+export const ROUTE_ENDS = new Set(['trade', 'key', 'home']);
+export const isRouteEnd = (node) => ROUTE_ENDS.has(node.type);
+
+/** Possible routes for a trader standing on a trade node or planet. */
 export function routeOptions(state, ship) {
-  if (!isTrader(ship) || state.map.nodes[ship.tile].type !== 'trade') return [];
+  const here = state.map.nodes[ship.tile];
+  if (!isTrader(ship) || !isRouteEnd(here)) return [];
   const adj = adjFor(state.map);
   return state.map.nodes
-    .filter((n) => n.type === 'trade' && n.id !== ship.tile)
+    .filter((n) => n.id !== ship.tile && isRouteEnd(n) && (here.type === 'trade' || n.type === 'trade'))
     .map((n) => {
       const path = shortestPath(adj, ship.tile, n.id);
       return path && { to: n.id, path, length: path.length - 1 };

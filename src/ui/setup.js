@@ -5,6 +5,7 @@ import { createGame } from '../game/state.js';
 import { PLAYER_COLORS } from '../render/sprites.js';
 import { h, spriteIcon } from './dom.js';
 import { loadGame, saveGame } from './storage.js';
+import { soundMenu } from './soundmenu.js';
 
 export function mountSetup(root) {
   const saved = loadGame();
@@ -51,7 +52,7 @@ export function mountSetup(root) {
     location.hash = '#play';
   };
 
-  root.append(h('div.setup',
+  root.append(h('div.setup-sound', soundMenu()), h('div.setup',
     h('div.setup-card',
       h('h1', 'Galaxy Trade Lanes'),
       h('div.subtitle', 'Fleet Command · hot-seat prototype'),

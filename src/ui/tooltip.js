@@ -12,13 +12,13 @@ import { CANNON_PIERCE, EVASIVE_REDUCTION, EMERGENCY_SHIELDS } from '../game/com
 import { h, spriteIcon } from './dom.js';
 import { TYPE_LABEL, TYPE_EFFECT, CP_VALUE, tilePreview, tileTitle } from './details.js';
 
-export const TIP_DELAY = 2000;
+export const TIP_DELAY = 1000;
 
 // ---------------------------------------------------------------- rules text
 
 const TYPE_RULES = {
   ship: [
-    'Play it to deploy the ship at a tile you control, or at your carrier\'s tile.',
+    'Play it to deploy the ship at a planet or station you control, or at your carrier\'s tile.',
     'While on the board it uses Command Points; you can\'t deploy past your capacity.',
     'If it is destroyed, the card (and any upgrades) go back to your discard pile, and the attacker scores 1 VP.',
   ],
@@ -142,10 +142,11 @@ const TILE_RULES = {
   ],
   trade: [
     'Held like a planet once claimed.',
-    'A freighter or blockade runner here can set up a trade route to another trade node within 8 jumps.',
+    'A freighter or blockade runner here can set up a trade route to another trade node or a planet within 8 jumps.',
   ],
   intersection: [
     'Held like a planet once claimed.',
+    'Toll: +1 credit at the start of each of your turns while you hold it.',
     'Many shortest paths run through here, so ships stopping on enemy tiles can block traffic.',
   ],
   empty: ['Open space is only controlled while your ships are on it.'],
