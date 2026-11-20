@@ -995,3 +995,8 @@ body.still .tp-kill, body.still .tp-hull .seg.lose { animation: none; }
 .battle .hidden { display: none !important; }
 .battle-select { font-size: 12px; padding: 2px 4px; }
 .pirate-callout { border-color: #ff4d4d; }
+
+/* Buy several copies */
+.qty { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.qty-btn { width: 32px; height: 32px; padding: 0; font-size: 18px; font-weight: 700; display: grid; place-items: center; }
+.qty-n { min-width: 22px; text-align: center; font-size: 18px; font-variant-numeric: tabular-nums; }

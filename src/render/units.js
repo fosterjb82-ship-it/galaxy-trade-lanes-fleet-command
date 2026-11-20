@@ -47,10 +47,12 @@ export function unitLayer(getView) {
       board.drawBadge('☠ PIRATES', p.x, p.y, { size: cssTile >= 80 ? 10 : 8, bg: '#3a0d0d', border: '#ff4d4d', fg: '#ffd6d6' });
     }
 
-    // Deploy / placement targets.
+    // Deploy / placement targets. Tiles with ships you don't control are a hard stop.
+    const stops = new Set(view.blockers ?? []);
     for (const tile of targets ?? []) {
       const n = map.nodes[tile];
-      board.strokeHex(n, '#6dffa8', 2.5, { glow: 9, inset: 1.6 });
+      if (stops.has(tile)) board.strokeHex(n, '#ffb347', 2.5, { glow: 9, inset: 1.6, dash: [5, 4] });
+      else board.strokeHex(n, '#6dffa8', 2.5, { glow: 9, inset: 1.6 });
     }
 
     // Trade routes: dashed lines in the owner's colour (red-tinted if blockaded).

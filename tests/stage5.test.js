@@ -433,3 +433,31 @@ test('ships deploy only at controlled planets and stations (and carriers)', () =
   spawn(g, 0, 'carrier', open.id);
   assert.ok(deployTiles(g, 0).includes(open.id), 'a carrier is still a deploy point');
 });
+
+test('a freighter must leave its own home before setting up a route', () => {
+  const g = createGame({ missions: 'auto', seed: 'HOME-ROUTE', players: ['Ada', 'Bo'] });
+  const [fr] = g.ships.filter((s) => s.owner === 0 && s.type === 'freighter');
+  assert.equal(fr.tile, g.players[0].home);
+  assert.deepEqual(routeOptions(g, fr), [], 'no route from your own home');
+  assert.throws(() => act(g, { type: 'establishRoute', player: 0, ship: fr.id, to: g.map.nodes.find((n) => n.type === 'trade').id }), /trade node or planet/);
+  // From a trade node, a route to your own home is still allowed.
+  const tn = g.map.nodes.find((n) => n.type === 'trade');
+  fr.tile = tn.id;
+  const opts = routeOptions(g, fr);
+  assert.ok(opts.length > 0);
+  // An enemy home is a valid start for your freighter.
+  fr.tile = g.players[1].home;
+  assert.ok(routeOptions(g, fr).every((o) => g.map.nodes[o.to].type === 'trade'));
+});
+
+test('shipyard cards can be bought several at a time; market cards cannot', () => {
+  let g = newGame();
+  g.players[0].credits = 9;
+  g = act(g, { type: 'buy', player: 0, def: 'ship-fighter', count: 3 });
+  assert.equal(g.players[0].credits, 3);
+  assert.equal(g.players[0].discard.filter((u) => g.cards[u].def === 'ship-fighter').length, 3);
+  assert.throws(() => act(g, { type: 'buy', player: 0, def: 'ship-fighter', count: 2 }), /2 × Fighter cost 4; you have 3/);
+  assert.throws(() => act(g, { type: 'buy', player: 0, def: g.market.row[0], count: 2 }), /only Shipyard cards/);
+  assert.throws(() => act(g, { type: 'buy', player: 0, def: 'credits', count: 0 }), /between 1 and 20/);
+  cardLocations(g);
+});

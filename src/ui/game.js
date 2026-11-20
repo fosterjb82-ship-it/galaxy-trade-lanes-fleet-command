@@ -126,7 +126,10 @@ export function mountGame(root) {
     if (mode.kind === 'moveDest') {
       view.targets = [...mode.routes.keys()];
       view.selectedShip = mode.ship;
-      view.labels = new Map([...mode.routes].map(([t, r]) => [t, `${r.cost}${r.nebulas ? ' ☁' : ''}`]));
+      const mover = state.ships.find((s) => s.id === mode.ship);
+      const blocked = (t) => state.ships.some((s) => s.tile === t && s.owner !== mover?.owner);
+      view.labels = new Map([...mode.routes].map(([t, r]) => [t, `${r.cost}${r.nebulas ? ' ☁' : ''}${blocked(t) ? ' ✋' : ''}`]));
+      view.blockers = [...mode.routes.keys()].filter(blocked);
       const hovered = board.hover !== null ? mode.routes.get(board.hover) : null;
       if (hovered) view.path = hovered.path;
     }
@@ -1104,7 +1107,7 @@ export function mountGame(root) {
       content = [h('span', `${def.name}: click a highlighted tile with a damaged ship (+${def.repair} hull).`), cancel];
     } else if (mode.kind === 'moveDest') {
       const s = state.ships.find((x) => x.id === mode.ship);
-      content = [h('span', `Move ${SHIPS[s.type].name.toLowerCase()} (speed ${SHIPS[s.type].speed}): click a destination. Badges show movement used, ☁ = nebula damage.`), cancel];
+      content = [h('span', `Move ${SHIPS[s.type].name.toLowerCase()} (speed ${shipStats(state, s).speed + (CARDS[state.cards[mode.card].def].speedBonus ?? 0)}): click a destination. Badges show movement used, ☁ = nebula damage, ✋ = ships you don\'t control: you must stop there.`), cancel];
     }
     modeBar.replaceChildren(...(content ?? []));
     modeBar.classList.toggle('show', Boolean(content));
@@ -1194,12 +1197,16 @@ export function mountGame(root) {
   }
 
   /** Show one card large, with a Buy button. */
-  function inspectCard(defId, uid) {
+  function inspectCard(defId, uid, qty = 1) {
     const p = me();
     const card = CARDS[defId];
-    const price = buyPrice(state, p.id, defId);
-    let why = null;
+    const each = buyPrice(state, p.id, defId);
     const inHand = handCredits(state, p.id);
+    const shipyard = !uid; // Shipyard cards never run out: buy several at once
+    const maxQty = shipyard ? Math.max(1, Math.min(9, Math.floor((p.credits + inHand) / each))) : 1;
+    qty = Math.max(1, Math.min(qty, maxQty));
+    const price = each * qty;
+    let why = null;
     const pay = !concealed && p.credits < price ? autoPayCards(state, p.id, price - p.credits) : [];
     if (concealed) why = `Show ${p.name}'s hand first.`;
     else if (state.phase !== 'action') why = 'The game is over.';
@@ -1210,8 +1217,16 @@ export function mountGame(root) {
     const scouted = uid && p.scout === uid;
     const buy = () => {
       hideOverlay();
-      if (dispatch({ type: 'buy', player: p.id, def: uid ?? defId, autoPay: true })) say(`Bought ${card.name}. It goes to your discard pile.`);
+      if (dispatch({ type: 'buy', player: p.id, def: uid ?? defId, autoPay: true, count: qty })) {
+        say(qty > 1 ? `Bought ${qty} × ${card.name}. They go to your discard pile.` : `Bought ${card.name}. It goes to your discard pile.`);
+      }
     };
+    const stepper = shipyard && !concealed && state.phase === 'action' && h('div.qty',
+      h('span.muted.small', 'Copies'),
+      h('button.qty-btn', { 'aria-label': 'One fewer', disabled: qty <= 1, onclick: () => inspectCard(defId, uid, qty - 1) }, '−'),
+      h('b.qty-n', qty),
+      h('button.qty-btn', { 'aria-label': 'One more', disabled: qty >= maxQty, onclick: () => inspectCard(defId, uid, qty + 1) }, '+'),
+      h('span.muted.small', maxQty > 1 ? `You can afford up to ${maxQty}.` : `${each} each`));
     showOverlay([
       h('div.inspect',
         cardLarge(defId, { owner: p.id }),
@@ -1220,13 +1235,14 @@ export function mountGame(root) {
           scouted && h('p.muted.small', 'Buy it this turn, or it goes to the bottom of the market deck when your turn ends.'),
           h('h2', card.name),
           h('p', card.text),
-          price < card.cost && h('p.muted.small', `You control a station: ${card.cost} − 1 = ${price}.`),
+          each < card.cost && h('p.muted.small', `You control a station: ${card.cost} − 1 = ${each}.`),
           h('p.muted.small', 'Bought cards go to your discard pile and come into your hand when you draw them.'),
+          stepper,
           why && h('div.callout.danger', h('span', why)),
           !why && payNote && h('p.small.pay-note', spriteIcon('card:credit', 14), payNote),
           h('div.dialog-actions',
             h('button.big', { onclick: hideOverlay }, 'Close'),
-            h('button.primary.big', { disabled: Boolean(why), onclick: buy }, `Buy for ${price}`)))),
+            h('button.primary.big', { disabled: Boolean(why), onclick: buy }, qty > 1 ? `Buy ${qty} for ${price}` : `Buy for ${price}`)))),
     ]);
   }
 
@@ -1291,7 +1307,7 @@ export function mountGame(root) {
             h('span', r.label), h('span.muted.small', plural(r.length, 'jump')),
             h(`b.small${blocked ? '.warn' : ''}`, blocked ? 'blockaded' : `+${routeIncome(state, r)}/turn`));
         }))
-        : h('p.muted.small', 'No trade routes. Move a freighter or blockade runner onto a trade node or planet to set one up (one end must be a trade node).'),
+        : h('p.muted.small', 'No trade routes. Move a freighter or blockade runner out of your home and onto a trade node or planet to set one up (one end must be a trade node).'),
       ...traders.map((s) => {
         const opts = routeOptions(state, s);
         const sel = h('select', { 'aria-label': 'Route destination' }, opts.map((o) => h('option', { value: o.to },

@@ -131,6 +131,7 @@ const TILE_RULES = {
   home: [
     'Home defences: any enemy ship (or pirate) that ends a move here takes 2 damage, so a lone fighter can\'t raid it.',
     'An enemy that survives and has the upper hand here takes control, and its 6 CP, until you take it back.',
+    'Trade routes can run to a home, but a freighter has to leave its own home before it can set one up.',
   ],
   key: [
     'Claim it by having the only ships here, or the most total hull. It stays yours after your ships leave.',

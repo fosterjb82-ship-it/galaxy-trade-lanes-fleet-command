@@ -140,7 +140,7 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - Each uses a slot, duplicates aren't allowed, and some are restricted to certain ships (Heavy Cannon, Cargo Pod, Laser Battery).
   - Effects feed straight into movement and the combat preview. Upgrades return to the discard pile with a destroyed ship.
 - **Trade routes:**
-  - A freighter or blockade runner on a trade node or planet (home or key planet) can set up a route up to 8 jumps away, along the shortest open path. One end must be a trade node: trade node to trade node, or trade node to planet. The route is drawn on the board in your colour.
+  - A freighter or blockade runner on a trade node or planet (home or key planet) can set up a route up to 8 jumps away, along the shortest open path. One end must be a trade node: trade node to trade node, or trade node to planet. A ship sitting in its own home can't set up a route; it has to leave home first. The route is drawn on the board in your colour.
   - The ship must stay on the route's path, or the route closes.
   - Income arrives at the start of your turn: +1, or +2 for routes of 3+ jumps, and +1 more with a Cargo Pod.
   - Any enemy ship or pirate on the path is a blockade, and that route pays nothing.
@@ -256,6 +256,12 @@ Rest the pointer on something for **1 second** to see a magnified picture with i
 - **Battle close-ups:** attacks and reactions play as a short side-on scene. Ships slide in, any reaction card flips in, shots fly (laser bolts, cannon slugs, arcing missiles, ion arcs), shields shimmer when they soak damage, hull bars drain and destroyed ships explode.
   - The result (−2, BLOCKED, EVADED, ION, DESTROYED) stays on screen with the combat log. Click, Space or Enter skips; Continue moves on.
   - **Battles** in the top bar picks *Close-up*, *Close-up on kills* or *Board only*, which keeps the old on-board effects and report.
+
+### Routes, blocking and buying in bulk
+
+- **Leave home first:** a freighter or blockade runner sitting in its own home sector can't set up a trade route. Routes can still end at your home, and an enemy home works as a starting point.
+- **Ships you don't control block movement:** this rule was already in the engine. While choosing a move, any tile in range holding ships you don't control (another player's or pirates) gets an amber dashed outline and a ✋ badge. You can stop there, but you can't fly through it, so tiles beyond it are only reachable by another way round.
+- **Buy several copies:** Shipyard cards (Credits and the four basic ships) have a − / + copies selector in the buy dialog, up to what you can afford with your credits and the Credit cards in hand. Market row and scouted cards are single cards, so they stay one at a time.
 
 ## Rules decided where the design was silent or didn't fit the hex board
 

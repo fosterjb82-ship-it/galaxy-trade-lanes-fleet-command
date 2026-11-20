@@ -975,7 +975,7 @@ const HANDLERS = {
     checkAmbush(state, ship);
   },
 
-  buy(state, { player, def, autoPay = false }) {
+  buy(state, { player, def, autoPay = false, count = 1 }) {
     requireTurn(state, player);
     const p = state.players[player];
     // def is a Shipyard card id, or the uid of a Market Row (or scouted) card.
@@ -984,7 +984,10 @@ const HANDLERS = {
     const scouted = fromMarket && p.scout === uid;
     if (fromMarket && !scouted && !state.market.row.includes(uid)) throw new GameError('That card is not for sale.');
     const defId = fromMarket ? state.cards[uid].def : def;
-    const price = buyPrice(state, player, defId);
+    if (!Number.isInteger(count) || count < 1 || count > 20) throw new GameError('Buy between 1 and 20 copies.');
+    if (fromMarket && count > 1) throw new GameError('There is only one of each market card: only Shipyard cards can be bought in multiples.');
+    const each = buyPrice(state, player, defId);
+    const price = each * count;
     if (p.credits < price && autoPay) {
       const pay = autoPayCards(state, player, price - p.credits);
       if (pay) {
@@ -997,7 +1000,7 @@ const HANDLERS = {
     }
     if (p.credits < price) {
       const inHand = handCredits(state, player);
-      throw new GameError(`${CARDS[defId].name} costs ${price}; you have ${p.credits} credit${p.credits === 1 ? '' : 's'}${inHand ? ` and ${inHand} more in Credit cards` : ''}.`);
+      throw new GameError(`${count > 1 ? `${count} × ${CARDS[defId].name} cost` : `${CARDS[defId].name} costs`} ${price}; you have ${p.credits} credit${p.credits === 1 ? '' : 's'}${inHand ? ` and ${inHand} more in Credit cards` : ''}.`);
     }
     p.credits -= price;
     p.spent += price;
@@ -1014,9 +1017,9 @@ const HANDLERS = {
       if (state.market.deck.length) state.market.row[i] = state.market.deck.shift();
       else state.market.row.splice(i, 1);
     } else {
-      p.discard.push(newCard(state, defId, player));
+      for (let i = 0; i < count; i++) p.discard.push(newCard(state, defId, player));
     }
-    log(state, `${p.name} bought ${CARDS[defId].name} for ${price}.`);
+    log(state, `${p.name} bought ${count > 1 ? `${count} × ` : ''}${CARDS[defId].name} for ${price}.`);
   },
 
   attack(state, { player, card, ship: shipId, target: targetId, weapon = 0 }) {
