@@ -7,7 +7,7 @@ import { unitLayer } from '../render/units.js';
 import { PLAYER_COLORS, PIRATE_COLOR } from '../render/sprites.js';
 import { slotOffset } from '../render/units.js';
 import { CARDS, CARD_TYPE, cardDef } from '../game/cards.js';
-import { SHIPS, shipDef } from '../game/ships.js';
+import { SHIPS, PIRATE, shipDef, shipSprite } from '../game/ships.js';
 import {
   applyAction, controllerOf, cpCapacity, cpUsed, deployCheck, shipsAt, shipsOf, moveTargets, buyPrice,
   hasStation, turnOrder, tileName, GameError, SHIPYARD, MAX_KEEP, HAND_SIZE, reactionCheck, retreatTiles,
@@ -45,6 +45,7 @@ const BATTLE_VIEW_KEY = 'fleetcommand.battleview';
 function battleView() {
   try { return localStorage.getItem(BATTLE_VIEW_KEY) ?? 'always'; } catch { return 'always'; }
 }
+const TYPE_LABEL_SHORT = { trade: 'Trade node', key: 'Key planet', home: 'Home' };
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const CP_LABEL = { home: 'Home sector', key: 'Key planet', station: 'Station' };
 
@@ -119,6 +120,8 @@ export function mountGame(root) {
       warnings: pirateWarning(state)?.tiles ?? [],
     };
     if (['deploy', 'moveShip', 'attackShip', 'repair', 'upgrade'].includes(mode.kind)) view.targets = mode.tiles;
+    if (mode.pickFrom && pickHover) view.selectedShip = pickHover;
+    if (routePreview && mode.kind === 'idle') view.path = routePreview;
     if (mode.kind === 'attackTarget') {
       view.selectedShip = mode.ship;
       view.attack = { shooter: mode.ship, targets: bestOptions(mode.options), hover: hoverTarget };
@@ -139,6 +142,9 @@ export function mountGame(root) {
   let startFx = [];
   let pendingBattle = null; // close-up waiting for the board effects to finish
   let hoverTarget = null; // ship under the pointer while aiming
+  let pickHover = null; // ship tile under the pointer in a picker
+  let routePreview = null; // trade route path to draw while choosing one
+  let clearedFor = null; // picker the map was last panned for
   let seenHand = new Set(); // cards already shown, so only new draws deal in // start-of-turn effects, played once the player reveals their hand
   board.setOptions({ labelFilter: (n) => !state.ships.some((s) => s.tile === n.id) });
   board.setMap(state.map);
@@ -494,7 +500,8 @@ export function mountGame(root) {
         else {
           const s = state.ships.find((x) => x.id === ship);
           if (s && isTrader(s) && routeOptions(state, s).length && !state.routes.some((r) => r.ship === s.id)) {
-            say(`Your ${SHIPS[s.type].name.toLowerCase()} can start a trade route here: set one up from the Trade panel.`);
+            fxp.whenIdle(() => openShip(s.id));
+            say(`Your ${SHIPS[s.type].name.toLowerCase()} can start a trade route here: pick a destination in its panel.`);
           }
         }
       }
@@ -599,7 +606,8 @@ export function mountGame(root) {
         st.cloaked && 'cloaked', st.pointDefense && 'point defense', st.pierce && 'targeting computer',
         st.repairDrones && 'repair drones', st.cargoPod && 'cargo pod'].filter(Boolean).join(', ')),
       h('div.row', h('span', 'Location'), h('button.linkish', { onclick: () => openDetails(ship.tile) }, tileTitle(state.map.nodes[ship.tile]))),
-      route && row('Trade route', `${route.label} (${plural(route.length, 'jump')})`),
+      !pirate && isTrader(ship) && h('h3', 'Trade route'),
+      !pirate && isTrader(ship) && routeSection(ship, mine),
       !pirate && h('h3', `Upgrade slots · ${ship.upgrades.length} of ${slots} used`),
       !pirate && h('div.slots', [...ship.upgrades.map(upgradeSlot), ...Array.from({ length: Math.max(0, slots - ship.upgrades.length) }, emptySlot)]),
       fits.length > 0 && h('h3', 'Fit an upgrade from your hand'),
@@ -609,6 +617,57 @@ export function mountGame(root) {
     ].filter(Boolean));
     details.classList.add('open');
     return null;
+  }
+
+  /** A trader's route: what it runs now, and (on your turn) where it can run to. */
+  function routeSection(ship, mine) {
+    const route = state.routes.find((r) => r.ship === ship.id);
+    const node = state.map.nodes[ship.tile];
+    const opts = routeOptions(state, ship);
+    const current = route
+      ? h('div.route-current', { onmouseenter: () => previewRoute(route.path), onmouseleave: () => previewRoute(null) },
+        h('b', route.label),
+        h('span.muted.small', plural(route.length, 'jump')),
+        blockaded(state, route) ? h('b.small.warn', 'blockaded') : h('b.small.gold', `+${routeIncome(state, route)}/turn`))
+      : h('p.muted.small', 'No route yet.');
+    if (!mine) return h('div.route-box', current);
+    let why = null;
+    if (!opts.length) {
+      if (node.type === 'home' && node.homeOf === ship.owner) why = 'Leave your home sector first: then a trade node or planet can start a route.';
+      else if (!isRouteEnd(node)) why = 'Move onto a trade node or planet to set up a route from here.';
+      else why = 'No destination in range (one end must be a trade node, up to 8 jumps).';
+    }
+    return h('div.route-box',
+      current,
+      why && h('p.muted.small', why),
+      opts.length > 0 && h('div.small.muted', route ? 'Replace it with a route to:' : 'Set up a route to:'),
+      opts.length > 0 && h('div.route-opts', opts.map((o) => {
+        const income = routeIncome(state, { ship: ship.id, length: o.length });
+        const same = route && route.b === o.to && route.a === ship.tile;
+        return h(`button.route-opt${same ? '.on' : ''}`, {
+          type: 'button',
+          disabled: same,
+          'data-tip': `tile:${o.to}`,
+          onmouseenter: () => previewRoute(o.path),
+          onmouseleave: () => previewRoute(null),
+          onclick: () => {
+            previewRoute(null);
+            if (dispatch({ type: 'establishRoute', player: state.active, ship: ship.id, to: o.to })) {
+              say(`Trade route set up to ${tileTitle(state.map.nodes[o.to])}: +${income} credit${income === 1 ? '' : 's'} at the start of your turns.`);
+              openShip(ship.id);
+            }
+          },
+        },
+        h('span.ro-name', tileTitle(state.map.nodes[o.to])),
+        h('span.muted.small', `${TYPE_LABEL_SHORT[state.map.nodes[o.to].type] ?? ''} · ${plural(o.length, 'jump')}`),
+        h('b.gold', `+${income}`));
+      })),
+      h('p.muted.small', 'Point at a destination to see the route on the map. The ship must stay on the route, and enemy ships on it blockade it.'));
+  }
+
+  function previewRoute(path) {
+    routePreview = path;
+    board.invalidate();
   }
 
   function openDetails(tile) {
@@ -773,7 +832,7 @@ export function mountGame(root) {
       return h(`tr${r.place === 1 ? '.winner' : ''}`,
         h('td', h('b', r.place === 1 ? '🏆 1' : r.place)),
         h('td', h('span.swatch', { style: { background: PLAYER_COLORS[p.id].main } }), p.name),
-        h('td', p.vpFrom.planets), h('td', p.vpFrom.agreements), h('td', p.vpFrom.kills), h('td', p.vpFrom.missions),
+        h('td', p.vpFrom.planets), h('td', { title: `${p.vpFrom.agreements} from agreements, ${p.vpFrom.routes ?? 0} from active routes` }, p.vpFrom.agreements + (p.vpFrom.routes ?? 0)), h('td', p.vpFrom.kills), h('td', p.vpFrom.missions),
         h('td', h('b.total', p.vp)),
         h('td.small', plural(r.keys, 'planet'), ' · ', plural(r.ships, 'ship'), r.tiebreak && r.tiebreak !== 'shared' ? h('div.muted', `won tie on ${r.tiebreak}`) : null),
         h('td', ms));
@@ -787,7 +846,7 @@ export function mountGame(root) {
       h('div.ending.ends', h('div.ending-title', 'IMPERIAL CEASEFIRE'), h('div', `The war ends after round ${f.round}.`)),
       h('h2', { style: { color: PLAYER_COLORS[winner.id].light, marginTop: '14px' } }, headline),
       h('table.score.final',
-        h('thead', h('tr', h('th', '#'), h('th', 'Player'), h('th', 'Planets'), h('th', 'Trade'), h('th', 'Kills'), h('th', 'Missions'), h('th', 'Total'), h('th', 'Tiebreak'), h('th', 'Secret missions'))),
+        h('thead', h('tr', h('th', '#'), h('th', 'Player'), h('th', 'Planets'), h('th', { title: 'Trade agreements each round, plus 1 VP per active trade route at the end' }, 'Trade'), h('th', 'Kills'), h('th', 'Missions'), h('th', 'Total'), h('th', 'Tiebreak'), h('th', 'Secret missions'))),
         h('tbody', rows)),
       h('p.muted.small', 'Ties are broken by most key planets controlled, then most ships on the board.'),
       h('div.dialog-actions',
@@ -1057,6 +1116,39 @@ export function mountGame(root) {
     board.invalidate();
   }
 
+  /**
+   * A ship as a clickable tile: art, owner, hull bar, upgrades and a line of
+   * extra info. `lose` flashes that much hull; `badge` adds a corner label.
+   */
+  function shipChoice(id, { onClick, info = '', lose = 0, badge = null, danger = false, hover = false } = {}) {
+    const s = state.ships.find((x) => x.id === id);
+    const pirate = s.owner === 'pirate';
+    const max = pirate ? PIRATE.hull : SHIPS[s.type].hull;
+    const color = pirate ? PIRATE_COLOR : PLAYER_COLORS[s.owner];
+    const after = Math.max(0, s.hull - lose);
+    const segs = Array.from({ length: max }, (_, i) => h(`span.seg${i >= s.hull ? '.empty' : i >= after ? '.lose' : ''}`, { style: i < after ? { background: color.main } : null }));
+    const status = [
+      s.disabled !== undefined && 'ION-disabled',
+      s.firedTurn === state.turnNumber && 'fired this turn',
+      state.routes.some((r) => r.ship === s.id) && 'runs a trade route',
+    ].filter(Boolean);
+    return h(`button.ship-choice${danger ? '.danger' : ''}${badge === 'DESTROY' ? '.lethal' : ''}`, {
+      type: 'button',
+      style: { '--owner': color.main },
+      'data-tip': `ship:${s.id}`,
+      onclick: onClick,
+      onmouseenter: () => { pickHover = s.id; if (hover) hoverTarget = s.id; board.invalidate(); },
+      onmouseleave: () => { pickHover = null; if (hover) hoverTarget = null; board.invalidate(); },
+    },
+    badge && h('span.sc-badge', badge),
+    h('div.sc-art', spriteIcon(`ship:${shipSprite(s)}:${pirate ? 'pirate' : s.owner}`, 96)),
+    h('div.sc-name', h('b', pirate ? 'Pirate fleet' : SHIPS[s.type].name), h('span', pirate ? 'Pirates' : state.players[s.owner].name)),
+    h('div.sc-hull', segs, h('span.sc-num', lose ? `${s.hull}→${after}` : `${s.hull}/${max}`)),
+    s.upgrades.length > 0 && h('div.sc-ups', s.upgrades.map((u) => h('span.sc-up', { 'data-tip': `card:${state.cards[u].def}` }, CARDS[state.cards[u].def].name))),
+    info && h('div.sc-info', info),
+    status.length > 0 && h('div.sc-status', status.join(' · ')));
+  }
+
   function renderModeBar() {
     const cancel = h('button', { onclick: () => setMode({ kind: 'idle' }) }, 'Cancel (Esc)');
     let content = null;
@@ -1064,43 +1156,50 @@ export function mountGame(root) {
       const def = CARDS[state.cards[mode.card].def];
       content = [h('span', `Deploy ${def.name.toLowerCase()} (${SHIPS[def.ship].cp} CP): click a highlighted tile.`), cancel];
     } else if (mode.kind === 'moveShip') {
+      const bonus = CARDS[state.cards[mode.card].def].speedBonus ?? 0;
       content = mode.pickFrom
-        ? [h('span', 'Which ship?'), ...mode.pickFrom.map((id) => {
-          const s = state.ships.find((x) => x.id === id);
-          return h('button', { onclick: () => chooseShip(mode.card, id) }, `${SHIPS[s.type].name} ${s.hull}/${SHIPS[s.type].hull}`);
-        }), cancel]
+        ? [h('span', 'Which ship moves?'), h('div.ship-choices', mode.pickFrom.map((id) => shipChoice(id, {
+          onClick: () => chooseShip(mode.card, id),
+          info: `Speed ${shipStats(state, state.ships.find((x) => x.id === id)).speed + bonus}`,
+        }))), cancel]
         : [h('span', 'Move: click one of your highlighted ships.'), cancel];
     } else if (mode.kind === 'attackShip') {
       content = mode.pickFrom
-        ? [h('span', 'Which ship fires?'), ...mode.pickFrom.map((id) => {
+        ? [h('span', 'Which ship fires?'), h('div.ship-choices', mode.pickFrom.map((id) => {
           const s = state.ships.find((x) => x.id === id);
-          return h('button', { onclick: () => chooseAttacker(mode.card, id) }, SHIPS[s.type].name);
-        }), cancel]
+          const w = shipStats(state, s).weapons;
+          return shipChoice(id, { onClick: () => chooseAttacker(mode.card, id), info: w.map((x) => `${x.type} ${x.damage}`).join(' · ') });
+        })), cancel]
         : [h('span', 'Attack: click one of your highlighted ships.'), cancel];
     } else if (mode.kind === 'attackTarget') {
       const s = state.ships.find((x) => x.id === mode.ship);
-      content = [h('span', `${SHIPS[s.type].name} fires at:`), ...mode.options.map((o) => {
+      const weapons = shipStats(state, s).weapons;
+      content = [h('span', `${SHIPS[s.type].name} fires at:`), h('div.ship-choices', mode.options.map((o) => {
         const t = o.target;
-        const who = t.owner === 'pirate' ? 'Pirates' : state.players[t.owner].name;
-        const name = t.owner === 'pirate' ? 'fleet' : SHIPS[t.type].name.toLowerCase();
-        const max = t.owner === 'pirate' ? 4 : SHIPS[t.type].hull;
-        const after = o.preview.ion ? 'disabled' : Math.max(0, t.hull - o.preview.damage) === 0 ? 'destroyed' : `${t.hull}→${t.hull - o.preview.damage}`;
-        return h('button', { title: describeDamage(o.preview), onclick: () => fireAt(o) },
-          `${who} ${name} ${t.hull}/${max}: ${o.preview.ion ? 'ion' : `${o.preview.damage} dmg`} (${after})`);
-      }), cancel];
+        const lethal = !o.preview.ion && o.preview.damage >= t.hull;
+        return shipChoice(t.id, {
+          onClick: () => fireAt(o),
+          lose: o.preview.ion ? 0 : o.preview.damage,
+          danger: true,
+          badge: o.preview.ion ? 'ION' : lethal ? 'DESTROY' : `−${o.preview.damage}`,
+          info: `${weapons[o.weapon].type}: ${o.preview.ion ? 'disables it next turn' : describeDamage(o.preview)}`,
+          hover: true,
+        });
+      })), cancel];
     } else if (mode.kind === 'upgrade') {
       const def = CARDS[state.cards[mode.card].def];
       content = mode.pickFrom
-        ? [h('span', `Fit ${def.name} to:`), ...mode.pickFrom.map((id) => {
+        ? [h('span', `Fit ${def.name} to:`), h('div.ship-choices', mode.pickFrom.map((id) => {
           const s = state.ships.find((x) => x.id === id);
-          return h('button', {
-            onclick: () => {
+          return shipChoice(id, {
+            onClick: () => {
               const { card } = mode;
               mode = { kind: 'idle' };
               if (dispatch({ type: 'playUpgrade', player: state.active, card, ship: id })) say(`${def.name} fitted.`);
             },
-          }, `${SHIPS[s.type].name} (${s.upgrades.length}/${SHIPS[s.type].slots} slots)`);
-        }), cancel]
+            info: `${s.upgrades.length} of ${SHIPS[s.type].slots} slots used`,
+          });
+        })), cancel]
         : [h('span', `Fit ${def.name}: click a highlighted tile with one of your ships.`), cancel];
     } else if (mode.kind === 'repair') {
       const def = CARDS[state.cards[mode.card].def];
@@ -1111,6 +1210,27 @@ export function mountGame(root) {
     }
     modeBar.replaceChildren(...(content ?? []));
     modeBar.classList.toggle('show', Boolean(content));
+    // Ship pickers are tall: slide the map so the ships in question stay visible below them.
+    const involved = mode.kind === 'attackTarget'
+      ? [state.ships.find((x) => x.id === mode.ship)?.tile, ...mode.options.map((o) => o.target.tile)]
+      : (mode.pickFrom ?? []).map((id) => state.ships.find((x) => x.id === id)?.tile);
+    const key = `${mode.kind}|${involved.join(',')}`;
+    if (modeBar.querySelector('.ship-choices') && key !== clearedFor) {
+      clearedFor = key;
+      requestAnimationFrame(() => keepClearOfBar(involved.filter((t) => t !== undefined)));
+    } else if (!content) clearedFor = null;
+  }
+
+  function keepClearOfBar(tiles) {
+    if (!tiles.length) return;
+    const wrap = boardWrap.getBoundingClientRect();
+    const bar = modeBar.getBoundingClientRect();
+    const barBottom = bar.bottom - wrap.top + 24; // css px inside the board
+    const top = Math.min(...tiles.map((t) => board.toScreen(state.map.nodes[t].x, state.map.nodes[t].y - 14).y / board.dpr));
+    if (top >= barBottom) return;
+    const shift = Math.min(barBottom - top, wrap.height * 0.45); // css px to move the board down
+    board.center.y -= (shift * board.dpr) / board.scale;
+    board.invalidate();
   }
 
   function renderHand(p) {
@@ -1163,9 +1283,53 @@ export function mountGame(root) {
         h('div.muted.small', `${p.played.length} card${p.played.length === 1 ? '' : 's'} played`)),
       h('div.hand-cards', cards.length ? cards : h('div.muted', 'No cards left in hand.')),
       h('div.piles',
-        h('div.pile', h('b', p.deck.length), h('span', 'Deck')),
-        h('div.pile', h('b', p.discard.length), h('span', 'Discard'))),
+        h('button.pile', { type: 'button', title: 'View your deck: draw pile, discard pile and cards on the board', onclick: () => deckDialog('deck') }, h('b', p.deck.length), h('span', 'Deck')),
+        h('button.pile', { type: 'button', title: 'View your discard pile', onclick: () => deckDialog('discard') }, h('b', p.discard.length), h('span', 'Discard'))),
       h('button.end-turn', { onclick: endTurnDialog, disabled: state.phase === 'over' }, state.phase === 'over' ? 'Game over' : 'End turn'));
+  }
+
+  /** Every card the active player owns, by where it is. */
+  function deckDialog(focus = 'deck') {
+    if (concealed) return say('Show your hand first.', 'error');
+    const p = me();
+    const TYPE_ORDER = ['credit', 'command', 'ship', 'upgrade', 'reaction', 'utility'];
+    const group = (uids) => {
+      const counts = new Map();
+      for (const u of uids) counts.set(state.cards[u].def, (counts.get(state.cards[u].def) ?? 0) + 1);
+      return [...counts].sort((a, b) => TYPE_ORDER.indexOf(CARDS[a[0]].type) - TYPE_ORDER.indexOf(CARDS[b[0]].type) || CARDS[a[0]].name.localeCompare(CARDS[b[0]].name));
+    };
+    const mini = ([defId, n]) => h(`div.tcard.mini.type-${CARDS[defId].type}`, { 'data-tip': `card:${defId}:${p.id}` },
+      n > 1 && h('span.mini-count', `×${n}`),
+      spriteIcon(`cardart:${defId}:${p.id}`, 92),
+      h('div.tc-name', CARDS[defId].name),
+      h('div.tc-foot', h('span.tc-kind', TYPE_WORD[CARDS[defId].type])));
+    const section = (id, title, uids, note) => h(`section.deck-section${focus === id ? '.focus' : ''}`, { id: `deck-${id}` },
+      h('h3', `${title} · ${uids.length}`),
+      note && h('p.muted.small', note),
+      uids.length ? h('div.deck-grid', group(uids).map(mini)) : h('p.muted.small', 'Empty.'));
+    const ships = shipsOf(state, p.id);
+    const onBoard = ships.flatMap((s) => [s.card, ...s.upgrades].filter(Boolean));
+    const all = [...p.deck, ...p.hand, ...p.reserve, ...p.played, ...p.discard, ...onBoard];
+    const byType = TYPE_ORDER.map((t) => [t, all.filter((u) => CARDS[state.cards[u].def].type === t).length]).filter(([, n]) => n);
+    showOverlay([
+      h('div.kicker', `${p.name}'s cards`),
+      h('h2', `${all.length} cards in total`),
+      h('div.deck-summary', byType.map(([t, n]) => h(`span.deck-chip.type-${t}`, `${n} ${TYPE_WORD[t]}`))),
+      h('div.deck-sections',
+        section('deck', 'Draw pile', p.deck, 'Shuffled: you draw from it in a random order. When it runs out, your discard pile is shuffled in.'),
+        section('hand', 'In hand', p.hand),
+        p.reserve.length > 0 && section('reserve', 'Kept in reserve', p.reserve, 'Hidden from opponents. Reactions here can answer attacks.'),
+        p.played.length > 0 && section('played', 'Played this turn', p.played, 'Goes to the discard pile when your turn ends.'),
+        section('discard', 'Discard pile', p.discard),
+        h(`section.deck-section${focus === 'board' ? '.focus' : ''}`,
+          h('h3', `On the board · ${onBoard.length}`),
+          h('p.muted.small', 'Ship cards and fitted upgrades. They return to your discard pile if the ship is destroyed.'),
+          ships.length ? h('div.deck-ships', ships.map((s) => h('div.deck-ship',
+            h('button.linkish', { onclick: () => { hideOverlay(); openShip(s.id); } }, `${SHIPS[s.type].name} at ${tileTitle(state.map.nodes[s.tile])}`),
+            h('div.deck-grid', [s.card, ...s.upgrades].filter(Boolean).map((u) => mini([state.cards[u].def, 1])))))) : h('p.muted.small', 'No ships on the board.'))),
+      h('div.dialog-actions', h('button.primary.big', { onclick: hideOverlay }, 'Close')),
+    ]);
+    overlay.querySelector('.deck-section.focus')?.scrollIntoView({ block: 'start' });
   }
 
   function cpMeter(pid) {
