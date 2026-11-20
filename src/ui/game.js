@@ -11,7 +11,7 @@ import { SHIPS, shipDef } from '../game/ships.js';
 import {
   applyAction, controllerOf, cpCapacity, cpUsed, deployCheck, shipsAt, shipsOf, moveTargets, buyPrice,
   hasStation, turnOrder, tileName, GameError, SHIPYARD, MAX_KEEP, HAND_SIZE, reactionCheck, retreatTiles,
-  upgradeCheck, END_ODDS_LABEL, END_CHANCE,
+  upgradeCheck, END_ODDS_LABEL, END_CHANCE, handCredits, autoPayCards, pirateWarning, pirateRound,
 } from '../game/state.js';
 import {
   routeOptions, isRouteEnd, routesOf, blockaded, routeIncome, activeAgreements, agreementBetween, offerCheck, isTrader, BREAK_BONUS,
@@ -24,6 +24,7 @@ import { installTooltips, cardTip, missionTip, tileTip, shipTip } from './toolti
 import { tileDetails, tileTitle, row } from './details.js';
 import { loadGame, saveGame, clearGame } from './storage.js';
 import { soundMenu } from './soundmenu.js';
+import { buildBattle, playBattle } from './battle.js';
 import { sound } from '../audio/sound.js';
 
 const board0Animate = () => {
@@ -39,6 +40,11 @@ const ACTION_SOUND = {
   buy: 'buy', playCredit: 'income', playUpgrade: 'card', scrap: 'card', repair: 'card', react: 'card',
   move: 'card', attack: 'card', deploy: 'card', establishRoute: 'income', chooseMissions: 'card', breakAgreement: 'income',
 };
+// Battle close-ups: 'always', 'kills' (only when a ship is destroyed) or 'off'.
+const BATTLE_VIEW_KEY = 'fleetcommand.battleview';
+function battleView() {
+  try { return localStorage.getItem(BATTLE_VIEW_KEY) ?? 'always'; } catch { return 'always'; }
+}
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const CP_LABEL = { home: 'Home sector', key: 'Key planet', station: 'Station' };
 
@@ -65,6 +71,10 @@ export function mountGame(root) {
     h('div.brand', h('h1', 'Fleet Command'), h('span.stage', state.settings?.length === 'quick' ? 'Quick game' : 'Hot-seat prototype')),
     roundLabel, orderChips,
     h('span.spacer'),
+    h('label.anim-toggle', { title: 'Show attacks as a short battle close-up' }, 'Battles',
+      h('select.battle-select', {
+        onchange: (e) => { try { localStorage.setItem(BATTLE_VIEW_KEY, e.target.value); } catch { /* ignore */ } },
+      }, [['always', 'Close-up'], ['kills', 'Close-up on kills'], ['off', 'Board only']].map(([v, l]) => h('option', { value: v, selected: battleView() === v }, l)))),
     h('label.anim-toggle', { title: 'Animations and ambient motion' },
       h('input', {
         type: 'checkbox', checked: board0Animate(),
@@ -90,6 +100,8 @@ export function mountGame(root) {
       h('button', { 'aria-label': 'Zoom out', title: 'Zoom out (−)', onclick: () => board.zoomBy(-1) }, '−'),
       h('button.fit', { title: 'Fit board (0)', onclick: () => board.fit() }, 'Fit')),
     modeBar, details, toast);
+  const targetPreview = h('div.target-preview');
+  boardWrap.append(targetPreview);
   const handBar = h('section.hand-bar');
   const sidebar = h('aside.sidebar');
   const overlay = h('div.overlay');
@@ -104,22 +116,20 @@ export function mountGame(root) {
       state, targets: [], selectedShip: null, labels: null, path: null,
       routes: state.routes.map((r) => ({ path: r.path, owner: r.owner, blockaded: blockaded(state, r) })),
       fx: fxp,
+      warnings: pirateWarning(state)?.tiles ?? [],
     };
     if (['deploy', 'moveShip', 'attackShip', 'repair', 'upgrade'].includes(mode.kind)) view.targets = mode.tiles;
     if (mode.kind === 'attackTarget') {
       view.selectedShip = mode.ship;
-      view.targets = [...new Set(mode.options.map((o) => o.target.tile))];
-      view.labels = new Map();
-      for (const o of mode.options) {
-        const prev = view.labels.get(o.target.tile);
-        const txt = o.preview.ion ? 'ion' : `−${o.preview.damage}`;
-        view.labels.set(o.target.tile, prev ? `${prev} ${txt}` : txt);
-      }
+      view.attack = { shooter: mode.ship, targets: bestOptions(mode.options), hover: hoverTarget };
     }
     if (mode.kind === 'moveDest') {
       view.targets = [...mode.routes.keys()];
       view.selectedShip = mode.ship;
-      view.labels = new Map([...mode.routes].map(([t, r]) => [t, `${r.cost}${r.nebulas ? ' ☁' : ''}`]));
+      const mover = state.ships.find((s) => s.id === mode.ship);
+      const blocked = (t) => state.ships.some((s) => s.tile === t && s.owner !== mover?.owner);
+      view.labels = new Map([...mode.routes].map(([t, r]) => [t, `${r.cost}${r.nebulas ? ' ☁' : ''}${blocked(t) ? ' ✋' : ''}`]));
+      view.blockers = [...mode.routes.keys()].filter(blocked);
       const hovered = board.hover !== null ? mode.routes.get(board.hover) : null;
       if (hovered) view.path = hovered.path;
     }
@@ -127,6 +137,8 @@ export function mountGame(root) {
   }));
   const fxp = new FxPlayer(board);
   let startFx = [];
+  let pendingBattle = null; // close-up waiting for the board effects to finish
+  let hoverTarget = null; // ship under the pointer while aiming
   let seenHand = new Set(); // cards already shown, so only new draws deal in // start-of-turn effects, played once the player reveals their hand
   board.setOptions({ labelFilter: (n) => !state.ships.some((s) => s.tile === n.id) });
   board.setMap(state.map);
@@ -149,7 +161,18 @@ export function mountGame(root) {
       saveGame(state);
       const cue = ACTION_SOUND[action.type];
       if (cue) sound.sfx(cue);
-      const events = state.fx ?? [];
+      let events = state.fx ?? [];
+      // Attacks and reactions: replay the fight as a close-up instead of on the board.
+      pendingBattle = null;
+      if (['attack', 'react'].includes(action.type) && state.lastCombat && !state.pending) {
+        const battle = buildBattle(prev, state, state.lastCombat, events);
+        const view = battleView();
+        if (battle && (view === 'always' || (view === 'kills' && battle.destroyed))) {
+          pendingBattle = { battle, result: state.lastCombat };
+          const fighters = new Set([state.lastCombat.attacker, state.lastCombat.target]);
+          events = events.filter((e) => !((e.kind === 'shot' && fighters.has(e.shooter)) || (e.kind === 'explode' && fighters.has(e.ship))));
+        }
+      }
       fxp.play(events.filter((e) => !e.start), prev, state);
       startFx = events.filter((e) => e.start);
       startFx.prev = prev;
@@ -234,6 +257,59 @@ export function mountGame(root) {
     say(`${def.name} can't be played yet.`);
   }
 
+  /** Best weapon option per target ship: a kill first, then the most damage; ion last. */
+  function bestOptions(options) {
+    const best = new Map();
+    const score = (o) => (o.preview.ion ? -1 : (o.preview.damage >= o.target.hull ? 100 : 0) + o.preview.damage);
+    for (const o of options) {
+      const cur = best.get(o.target.id);
+      if (!cur || score(o) > score(cur)) best.set(o.target.id, o);
+    }
+    return best;
+  }
+
+  /** Floating preview next to the pointer while aiming at a target. */
+  function showTargetPreview(opt, e) {
+    const t = opt.target;
+    const pirate = t.owner === 'pirate';
+    const max = pirate ? 4 : SHIPS[t.type].hull;
+    const after = opt.preview.ion ? t.hull : Math.max(0, t.hull - opt.preview.damage);
+    const lethal = !opt.preview.ion && after === 0;
+    const all = mode.options.filter((o) => o.target.id === t.id);
+    const weapons = shipStats(state, state.ships.find((s) => s.id === mode.ship)).weapons;
+    const reserve = pirate ? 0 : state.players[t.owner].reserve.length;
+    const segs = Array.from({ length: max }, (_, i) => h(`span.seg${i >= t.hull ? '.empty' : i >= after ? '.lose' : ''}`));
+    targetPreview.replaceChildren(...[
+      h('div.tp-head',
+        h('span.swatch', { style: { background: pirate ? '#d23c3c' : PLAYER_COLORS[t.owner].main } }),
+        h('b', pirate ? 'Pirate fleet' : `${state.players[t.owner].name}'s ${SHIPS[t.type].name.toLowerCase()}`),
+        lethal && h('span.tp-kill', 'DESTROY')),
+      h('div.tp-hull', segs, h('span.tp-hull-num', opt.preview.ion ? `${t.hull}/${max}` : `${t.hull} → ${after}`)),
+      ...all.map((o) => h(`div.tp-weapon${o === opt ? '.best' : ''}`,
+        h('span', `${weapons[o.weapon].type}`),
+        h('b', o.preview.ion ? 'Disables it next turn' : describeDamage(o.preview)))),
+      reserve > 0 && h('div.tp-note', `${state.players[t.owner].name} holds ${plural(reserve, 'card')} in reserve and may react.`),
+      h('div.tp-hint', all.length > 1 ? 'Click to fire the highlighted weapon, or pick one in the bar.' : 'Click to fire.'),
+    ].filter(Boolean));
+    const r = boardWrap.getBoundingClientRect();
+    let x = e.clientX - r.left + 18;
+    let y = e.clientY - r.top + 14;
+    targetPreview.classList.add('show');
+    const w = targetPreview.offsetWidth;
+    const hgt = targetPreview.offsetHeight;
+    if (x + w > r.width - 8) x = e.clientX - r.left - w - 18;
+    if (y + hgt > r.height - 8) y = r.height - hgt - 8;
+    targetPreview.style.transform = `translate(${Math.max(8, x)}px, ${Math.max(8, y)}px)`;
+  }
+
+  function hideTargetPreview() {
+    targetPreview.classList.remove('show');
+    if (hoverTarget !== null) {
+      hoverTarget = null;
+      board.invalidate();
+    }
+  }
+
   function chooseAttacker(card, shipId) {
     const ship = state.ships.find((s) => s.id === shipId);
     const options = attackOptions(state, ship, CARDS[state.cards[card].def].bonus);
@@ -294,7 +370,8 @@ export function mountGame(root) {
     return tileTip(shown, id, {
       controller: node.type === 'void' ? null : controller,
       ships: ships.map((x) => `${x.owner === 'pirate' ? 'pirate fleet' : `${state.players[x.owner].name}'s ${SHIPS[x.type].name.toLowerCase()}`} (${x.hull})`),
-      revealed: node.revealed ? `Revealed: it held a ${found[node.hiddenContent]}.` : null,
+      revealed: node.revealed ? `Revealed: it held a ${found[node.hiddenContent]}.`
+        : pirateWarning(state)?.tiles.includes(id) ? 'Pirate signals: a pirate fleet warps in here at the end of this round.' : null,
     });
   }
 
@@ -326,19 +403,30 @@ export function mountGame(root) {
     if (kind === 'mission') return missionTipFor(args[0]);
     if (kind === 'ship') return shipTipFor(args[0]);
     if (kind === 'tile') return tileTipFor(Number(args[0]));
+    if (kind === 'text') { // text:Title|Body
+      const [title, body] = args.join(':').split('|');
+      return [h('div.tip-head', h('b.tip-title', title)), h('p.tip-text', body)];
+    }
     return null;
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (e.buttons) return tips.hide(); // panning
+    if (e.buttons) { hideTargetPreview(); return tips.hide(); } // panning
     const r = canvas.getBoundingClientRect();
     const tile = board.tileAt({ x: (e.clientX - r.left) * board.dpr, y: (e.clientY - r.top) * board.dpr });
     const sh = shipUnder(tile, e);
+    if (mode.kind === 'attackTarget' && !concealed) {
+      tips.hide();
+      const opt = sh && bestOptions(mode.options).get(sh.id);
+      if (!opt) return hideTargetPreview();
+      if (hoverTarget !== sh.id) { hoverTarget = sh.id; board.invalidate(); }
+      return showTargetPreview(opt, e);
+    }
     if (sh) return tips.hover(`ship:${sh.id}`, () => shipTipFor(sh.id), e);
     if (tile !== null) return tips.hover(`tile:${tile}`, () => tileTipFor(tile), e);
     return tips.hide();
   });
-  canvas.addEventListener('pointerleave', () => tips.hide());
+  canvas.addEventListener('pointerleave', () => { tips.hide(); hideTargetPreview(); });
 
   board.on('click', (tile, e) => {
     if (concealed || fxp.isBusy()) return;
@@ -367,8 +455,11 @@ export function mountGame(root) {
       return setMode({ ...mode, pickFrom: mine.map((s) => s.id) });
     }
     if (mode.kind === 'attackTarget') {
-      const here = mode.options.filter((o) => o.target.tile === tile);
-      if (!here.length) return say('Choose a highlighted target, or pick one from the bar above.', 'error');
+      const aimed = shipUnder(tile, e);
+      const pick = aimed && bestOptions(mode.options).get(aimed.id);
+      if (pick) { hideTargetPreview(); return fireAt(pick); }
+      const here = [...bestOptions(mode.options).values()].filter((o) => o.target.tile === tile);
+      if (!here.length) return say('Click a ship with a red target marker, or pick one from the bar above.', 'error');
       if (here.length === 1) return fireAt(here[0]);
       return say('Several targets there: pick one from the bar above.');
     }
@@ -640,7 +731,12 @@ export function mountGame(root) {
             h('td', h('b', p.vp)));
         }))),
       h('p.muted.small', 'Key planets score 2 VP each and active trade agreements 1 VP each, every round.'),
-      rs.round < 3 && h('p.muted.small', rs.round === 2 ? 'Pirates start moving and attacking at the end of round 3.' : 'Pirates hold still in rounds 1 and 2.'),
+      rs.arrivals?.length > 0 && h('div.callout.danger.pirate-callout',
+        h('b', 'Pirates warp in!'),
+        h('span', `${plural(rs.arrivals.length, 'pirate fleet')} arrived ${placesOf(rs.arrivals)}. They start hunting freighters at the end of round ${pirateRound(state)}.`)),
+      !over && pirateWarning(state) && h('div.callout.pirate-callout',
+        h('b', 'Pirate signals detected'),
+        h('span', `${plural(pirateWarning(state).tiles.length, 'pirate fleet')} will warp in ${placesOf(pirateWarning(state).tiles)} at the end of round ${state.round}. They're marked in red on the board.`)),
       rs.pirates?.length > 0 && h('div',
         h('h3.section', 'Pirate phase'),
         combatLines(rs.pirates)),
@@ -654,6 +750,14 @@ export function mountGame(root) {
         ? h('button.primary.big', { onclick: finalScreen }, 'Final scoring')
         : h('button.primary.big', { onclick: handoff }, `Start round ${state.round}`)),
     ]);
+  }
+
+  /** "at Kelea Gate and 1 other spot" / "at 2 spots in open space". */
+  function placesOf(tiles) {
+    const named = tiles.map((t) => state.map.nodes[t]).filter((n) => n.name).map((n) => n.name);
+    const rest = tiles.length - named.length;
+    if (!named.length) return `at ${plural(rest, 'spot')} in deep space`;
+    return `at ${named.join(', ')}${rest ? ` and ${plural(rest, 'other spot')}` : ''}`;
   }
 
   function finalScreen() {
@@ -763,6 +867,17 @@ export function mountGame(root) {
   }
 
   function combatReport(result, after = null) {
+    if (pendingBattle && pendingBattle.result === result) {
+      const { battle } = pendingBattle;
+      pendingBattle = null;
+      overlay.replaceChildren(h('div.dialog.battle-dialog'));
+      overlay.classList.add('show');
+      playBattle(overlay.firstChild, battle, {
+        animate: board.animate,
+        onDone: () => { hideOverlay(); render(); after?.(); },
+      });
+      return;
+    }
     showOverlay([
       h('div.kicker', 'Combat report'),
       h('h2', result.events.some((e) => e.includes('destroyed')) ? 'Ship destroyed!' : 'Shots fired'),
@@ -922,6 +1037,7 @@ export function mountGame(root) {
 
   function render() {
     const p = me();
+    if (mode.kind !== 'attackTarget' && targetPreview.classList.contains('show')) hideTargetPreview();
     roundLabel.textContent = `Round ${state.round}`;
     const order = turnOrder(state);
     orderChips.replaceChildren(...order.map((pid, i) => {
@@ -991,7 +1107,7 @@ export function mountGame(root) {
       content = [h('span', `${def.name}: click a highlighted tile with a damaged ship (+${def.repair} hull).`), cancel];
     } else if (mode.kind === 'moveDest') {
       const s = state.ships.find((x) => x.id === mode.ship);
-      content = [h('span', `Move ${SHIPS[s.type].name.toLowerCase()} (speed ${SHIPS[s.type].speed}): click a destination. Badges show movement used, ☁ = nebula damage.`), cancel];
+      content = [h('span', `Move ${SHIPS[s.type].name.toLowerCase()} (speed ${shipStats(state, s).speed + (CARDS[state.cards[mode.card].def].speedBonus ?? 0)}): click a destination. Badges show movement used, ☁ = nebula damage, ✋ = ships you don\'t control: you must stop there.`), cancel];
     }
     modeBar.replaceChildren(...(content ?? []));
     modeBar.classList.toggle('show', Boolean(content));
@@ -1065,9 +1181,10 @@ export function mountGame(root) {
   function tableCard(defId, uid, p) {
     const card = CARDS[defId];
     const price = buyPrice(state, p.id, defId);
-    const afford = !concealed && state.phase === 'action' && p.credits >= price;
+    const afford = !concealed && state.phase === 'action' && p.credits + handCredits(state, p.id) >= price;
     const kind = card.upgradeKind ? `${card.upgradeKind} upgrade` : TYPE_WORD[card.type];
-    return h(`button.tcard.type-${card.type}${afford ? '' : '.cant'}`, {
+    const scouted = uid && p.scout === uid;
+    return h(`button.tcard.type-${card.type}${afford ? '' : '.cant'}${scouted ? '.scouted' : ''}`, {
       type: 'button',
       'data-tip': `card:${defId}:${p.id}:${price}`,
       'aria-label': `${card.name}, costs ${price}. ${card.text}`,
@@ -1080,31 +1197,52 @@ export function mountGame(root) {
   }
 
   /** Show one card large, with a Buy button. */
-  function inspectCard(defId, uid) {
+  function inspectCard(defId, uid, qty = 1) {
     const p = me();
     const card = CARDS[defId];
-    const price = buyPrice(state, p.id, defId);
+    const each = buyPrice(state, p.id, defId);
+    const inHand = handCredits(state, p.id);
+    const shipyard = !uid; // Shipyard cards never run out: buy several at once
+    const maxQty = shipyard ? Math.max(1, Math.min(9, Math.floor((p.credits + inHand) / each))) : 1;
+    qty = Math.max(1, Math.min(qty, maxQty));
+    const price = each * qty;
     let why = null;
+    const pay = !concealed && p.credits < price ? autoPayCards(state, p.id, price - p.credits) : [];
     if (concealed) why = `Show ${p.name}'s hand first.`;
     else if (state.phase !== 'action') why = 'The game is over.';
-    else if (p.credits < price) why = `You have ${p.credits} credit${p.credits === 1 ? '' : 's'}; this costs ${price}. Play Credit cards from your hand first.`;
+    else if (!pay) why = `This costs ${price}. You have ${p.credits} credit${p.credits === 1 ? '' : 's'}${inHand ? ` and ${inHand} more in Credit cards` : ''}.`;
+    const payNote = pay?.length
+      ? `Buying plays ${pay.map((u) => CARDS[state.cards[u].def].name).join(' + ')} from your hand.`
+      : null;
+    const scouted = uid && p.scout === uid;
     const buy = () => {
       hideOverlay();
-      if (dispatch({ type: 'buy', player: p.id, def: uid ?? defId })) say(`Bought ${card.name}. It goes to your discard pile.`);
+      if (dispatch({ type: 'buy', player: p.id, def: uid ?? defId, autoPay: true, count: qty })) {
+        say(qty > 1 ? `Bought ${qty} × ${card.name}. They go to your discard pile.` : `Bought ${card.name}. It goes to your discard pile.`);
+      }
     };
+    const stepper = shipyard && !concealed && state.phase === 'action' && h('div.qty',
+      h('span.muted.small', 'Copies'),
+      h('button.qty-btn', { 'aria-label': 'One fewer', disabled: qty <= 1, onclick: () => inspectCard(defId, uid, qty - 1) }, '−'),
+      h('b.qty-n', qty),
+      h('button.qty-btn', { 'aria-label': 'One more', disabled: qty >= maxQty, onclick: () => inspectCard(defId, uid, qty + 1) }, '+'),
+      h('span.muted.small', maxQty > 1 ? `You can afford up to ${maxQty}.` : `${each} each`));
     showOverlay([
       h('div.inspect',
         cardLarge(defId, { owner: p.id }),
         h('div.inspect-side',
-          h('div.kicker', uid ? 'Market row' : 'Shipyard'),
+          h('div.kicker', scouted ? 'Scouted from the market deck' : uid ? 'Market row' : 'Shipyard'),
+          scouted && h('p.muted.small', 'Buy it this turn, or it goes to the bottom of the market deck when your turn ends.'),
           h('h2', card.name),
           h('p', card.text),
-          price < card.cost && h('p.muted.small', `You control a station: ${card.cost} − 1 = ${price}.`),
+          each < card.cost && h('p.muted.small', `You control a station: ${card.cost} − 1 = ${each}.`),
           h('p.muted.small', 'Bought cards go to your discard pile and come into your hand when you draw them.'),
+          stepper,
           why && h('div.callout.danger', h('span', why)),
+          !why && payNote && h('p.small.pay-note', spriteIcon('card:credit', 14), payNote),
           h('div.dialog-actions',
             h('button.big', { onclick: hideOverlay }, 'Close'),
-            h('button.primary.big', { disabled: Boolean(why), onclick: buy }, `Buy for ${price}`)))),
+            h('button.primary.big', { disabled: Boolean(why), onclick: buy }, qty > 1 ? `Buy ${qty} for ${price}` : `Buy for ${price}`)))),
     ]);
   }
 
@@ -1117,9 +1255,43 @@ export function mountGame(root) {
       h('section.table-section',
         h('div.table-head', h('h2', 'Market row'),
           h('span.deck-pile', { title: `${state.market.deck.length} cards left in the market deck` }, h('b', state.market.deck.length), ' in deck')),
-        h('div.tcards', state.market.row.map((uid) => tableCard(state.cards[uid].def, uid, p)))),
-      h('div.table-credits', spriteIcon('card:credit', 18), h('b', concealed ? '–' : p.credits), concealed ? 'credits' : 'credits to spend'),
-      h('p.muted.small.table-hint', 'Click a card to look at it and buy it.'));
+        h('div.tcards', state.market.row.map((uid) => tableCard(state.cards[uid].def, uid, p)), scoutSlot(p))),
+      tableCredits(p),
+      h('p.muted.small.table-hint', 'Click a card to look at it and buy it. Credit cards in your hand pay automatically.'));
+  }
+
+  /** The face-down market deck: flip its top card once per turn (Scout the market). */
+  function scoutSlot(p) {
+    if (!concealed && p.scout) return tableCard(state.cards[p.scout].def, p.scout, p);
+    const used = p.scoutTurn === state.turnNumber;
+    const why = concealed ? 'Show your hand first'
+      : state.phase !== 'action' ? 'The game is over'
+        : used ? 'Already scouted this turn'
+          : !state.market.deck.length ? 'The market deck is empty' : null;
+    return h(`button.tcard.scout${why ? '.cant' : ''}`, {
+      type: 'button',
+      disabled: Boolean(why),
+      'data-tip': 'text:Scout the market|Once per turn, free: flip the top card of the market deck. You can buy it this turn at its normal price; if you don\'t, it goes to the bottom of the deck when your turn ends.',
+      onclick: () => {
+        if (!dispatch({ type: 'scout', player: p.id })) return;
+        sound.sfx('card');
+        const uid = me().scout;
+        inspectCard(state.cards[uid].def, uid);
+      },
+    },
+    h('div.scout-back', h('span.scout-mark', '?')),
+    h('div.tc-name', 'Scout the market'),
+    h('div.tc-foot', h('span.tc-kind', why ?? 'Free · once per turn')));
+  }
+
+  function tableCredits(p) {
+    if (concealed) return h('div.table-credits', spriteIcon('card:credit', 18), h('b', '–'), 'credits');
+    const inHand = handCredits(state, p.id);
+    return h('div.table-credits', spriteIcon('card:credit', 18), h('b', p.credits), 'to spend',
+      inHand > 0 && h('span.muted', `+ ${inHand} in hand`),
+      inHand > 0 && state.phase === 'action' && h('button.small-btn', {
+        onclick: () => { if (dispatch({ type: 'playAllCredits', player: p.id })) say(`Played your Credit cards: ${me().credits} credits to spend.`); },
+      }, 'Play all credits'));
   }
 
   function tradePanel(p) {
@@ -1135,7 +1307,7 @@ export function mountGame(root) {
             h('span', r.label), h('span.muted.small', plural(r.length, 'jump')),
             h(`b.small${blocked ? '.warn' : ''}`, blocked ? 'blockaded' : `+${routeIncome(state, r)}/turn`));
         }))
-        : h('p.muted.small', 'No trade routes. Move a freighter or blockade runner onto a trade node or planet to set one up (one end must be a trade node).'),
+        : h('p.muted.small', 'No trade routes. Move a freighter or blockade runner out of your home and onto a trade node or planet to set one up (one end must be a trade node).'),
       ...traders.map((s) => {
         const opts = routeOptions(state, s);
         const sel = h('select', { 'aria-label': 'Route destination' }, opts.map((o) => h('option', { value: o.to },

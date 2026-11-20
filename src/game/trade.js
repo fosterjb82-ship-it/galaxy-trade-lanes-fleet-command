@@ -2,7 +2,8 @@
 //
 // Hex-board reading of the rules: a freighter or blockade runner standing on
 // a trade node or a planet (home or key planet) can set up a route to another
-// trade node or planet, as long as at least one end is a trade node. The route is the
+// trade node or planet, as long as at least one end is a trade node. (A ship
+// can't start a route from its own home: it has to leave home first.) The route is the
 // shortest open path between them, and the ship must stay somewhere on that
 // path to keep it running. Each of the owner's turns it pays +1 credit
 // (+2 for a route of 3+ jumps, +1 more with a Cargo Pod), unless an enemy
@@ -37,6 +38,7 @@ export const isRouteEnd = (node) => ROUTE_ENDS.has(node.type);
 export function routeOptions(state, ship) {
   const here = state.map.nodes[ship.tile];
   if (!isTrader(ship) || !isRouteEnd(here)) return [];
+  if (here.type === 'home' && here.homeOf === ship.owner) return []; // leave home first
   const adj = adjFor(state.map);
   return state.map.nodes
     .filter((n) => n.id !== ship.tile && isRouteEnd(n) && (here.type === 'trade' || n.type === 'trade'))

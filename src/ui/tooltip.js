@@ -131,6 +131,7 @@ const TILE_RULES = {
   home: [
     'Home defences: any enemy ship (or pirate) that ends a move here takes 2 damage, so a lone fighter can\'t raid it.',
     'An enemy that survives and has the upper hand here takes control, and its 6 CP, until you take it back.',
+    'Trade routes can run to a home, but a freighter has to leave its own home before it can set one up.',
   ],
   key: [
     'Claim it by having the only ships here, or the most total hull. It stays yours after your ships leave.',
@@ -209,7 +210,7 @@ export function shipTip(ship, o) {
     o.upgrades.length > 0 && h('ul.tip-rules', o.upgrades.map((u) => h('li', h('b', u.name), ` · ${u.text}`))),
     o.status.length > 0 && h('p.tip-note', o.status.join(' ')),
     rules(pirate
-      ? ['Neutral. Pirates hold still in rounds 1–2. From round 3, at the end of each round it moves 1 tile toward the nearest freighter or blockade runner, then attacks a ship on its tile.', 'Destroying it scores 1 VP. Home defences fire on pirates too.']
+      ? ['Neutral. Pirates warp in at the end of round 2 or 3 (with a round of warning). From the end of the next round, at the end of each round it moves 1 tile toward the nearest freighter or blockade runner, then attacks a ship on its tile.', 'Destroying it scores 1 VP. Home defences fire on pirates too.']
       : ['Damage stays until repaired: Repair cards, a station you control (full), or your carrier\'s tile (+2) at the start of your turn.']),
     h('p.tip-hint', 'Click the ship for full details and upgrade slots.'),
   ];

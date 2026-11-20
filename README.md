@@ -140,7 +140,7 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - Each uses a slot, duplicates aren't allowed, and some are restricted to certain ships (Heavy Cannon, Cargo Pod, Laser Battery).
   - Effects feed straight into movement and the combat preview. Upgrades return to the discard pile with a destroyed ship.
 - **Trade routes:**
-  - A freighter or blockade runner on a trade node or planet (home or key planet) can set up a route up to 8 jumps away, along the shortest open path. One end must be a trade node: trade node to trade node, or trade node to planet. The route is drawn on the board in your colour.
+  - A freighter or blockade runner on a trade node or planet (home or key planet) can set up a route up to 8 jumps away, along the shortest open path. One end must be a trade node: trade node to trade node, or trade node to planet. A ship sitting in its own home can't set up a route; it has to leave home first. The route is drawn on the board in your colour.
   - The ship must stay on the route's path, or the route closes.
   - Income arrives at the start of your turn: +1, or +2 for routes of 3+ jumps, and +1 more with a Cargo Pod.
   - Any enemy ship or pirate on the path is a blockade, and that route pays nothing.
@@ -153,7 +153,7 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - Your sidebar shows their progress, which is private.
   - Immediate missions are revealed with a public announcement the moment they're done. End-of-game missions are revealed at final scoring.
   - Diplomat and Backstabber are left out of 2-player games.
-- **Pirate phase (end of each round, from round 3):** pirates hold still in rounds 1–2. After that, each pirate fleet moves 1 tile toward the nearest freighter or blockade runner, then attacks a player ship on its tile, preferring traders.
+- **Pirate phase (end of each round, once pirates have arrived):** each pirate fleet moves 1 tile toward the nearest freighter or blockade runner, then attacks a player ship on its tile, preferring traders.
 - **Uncertain ending:**
   - After round 7 there is a 1 in 3 chance the game ends; after rounds 8 and 9, 1 in 2; round 10 always ends it.
   - The round summary shows the roll, with an "Imperial Ceasefire" alert when the war ends.
@@ -211,7 +211,7 @@ Images are cached by key, size and animation frame. Text, numbers, outlines and 
 Changes after playtesting, to soften the opening and stop early rushes:
 
 - **Held territory:** planets, stations, homes, trade nodes and intersections stay yours after your ships move on, until an enemy takes them. One fighter can claim tiles one after another instead of sitting on each.
-- **Pirates wait two rounds:** the pirate phase starts at the end of round 3, so early freighters aren't hunted straight away.
+- **Pirates arrive later:** see "Faster start and combat close-ups" below.
 - **Bigger maps:** one more ring of hexes at every player count. Radius 5 for 2 players, 6 for 3–4 players and 7 for 5–6 players. Homes sit 5–8 moves from the galactic core.
 - **Home defences:** any enemy ship (or pirate) that ends a move in someone's home sector takes 2 damage. A lone fighter is shot down, so taking a home needs a real fleet.
 
@@ -235,6 +235,33 @@ Rest the pointer on something for **1 second** to see a magnified picture with i
   - effects for engines, each weapon (laser, cannon, missile, ion), hits and shields, explosions, warp-ins, repairs, reveals, income, buying and playing cards, turn handoffs, round scoring, missions, victory, errors and button clicks.
   - The **🔊 Sound** button (top bar, and top-right of the setup screen) turns sound on or off and sets music and effects volume separately. It stays usable over dialogs, and the settings are remembered.
   - Browsers only allow audio after you interact with the page, so the music starts on your first click.
+
+### Faster start and combat close-ups
+
+- **Starting freighter:** every player starts with a freighter already at home, so trade can begin on turn 1. Its card isn't in your deck; if the freighter is destroyed, the card goes to your discard pile like any other ship.
+- **Pirates arrive in round 3 or 4:** there are no pirates at the start. Each game rolls whether they arrive at the start of round 3 or 4 (round 2 in quick games).
+  - **Warning:** for the whole round before, the tiles where they'll appear pulse red with a ☠ PIRATES marker. The round summary announces it, and the tile tooltip says so too.
+  - **Arrival:** at the end of that round, the pirates warp in (one fleet per pirate spot on the map: 2–4 by player count). They hunt from the end of the following round.
+  - Pirate nests in hidden tiles still spawn pirates when revealed.
+- **Scout the market:** a face-down card at the end of the market row.
+  - Once per turn, for free, click it to flip the top card of the market deck. It opens straight away so you can buy it at its normal price.
+  - If you don't buy it this turn, it goes to the bottom of the deck when your turn ends.
+- **Credits pay themselves:** buying a card plays the Credit cards in your hand that you need, picking the set that wastes the fewest credits. The buy dialog says which cards it will use, and card prices count the credits still in your hand.
+  - Smuggler's Cache is never played automatically, because it needs you to choose a discard.
+  - **Play all credits** (next to your credits on the table) plays every other Credit card at once.
+- **Targeting on the board:** when you attack, every ship in range gets a spinning red target marker. A ship alone on its tile also shows the damage it would take (☠ when the shot would destroy it). On crowded tiles the damage shows on the ship you point at.
+  - Pointing at a target draws an aim line from your ship and opens a preview: hull before and after, with the hull you'd remove flashing, a DESTROY badge for kills, the damage maths for each weapon, and a note if the defender holds reaction cards.
+  - Click the target to fire. With more than one weapon, it uses the best one; the bar above the map still lists every option.
+- **Hull bars and smoke:** ships show a segmented hull bar under them (and the number when zoomed in close). Ships at half hull or less trail smoke.
+- **Battle close-ups:** attacks and reactions play as a short side-on scene. Ships slide in, any reaction card flips in, shots fly (laser bolts, cannon slugs, arcing missiles, ion arcs), shields shimmer when they soak damage, hull bars drain and destroyed ships explode.
+  - The result (−2, BLOCKED, EVADED, ION, DESTROYED) stays on screen with the combat log. Click, Space or Enter skips; Continue moves on.
+  - **Battles** in the top bar picks *Close-up*, *Close-up on kills* or *Board only*, which keeps the old on-board effects and report.
+
+### Routes, blocking and buying in bulk
+
+- **Leave home first:** a freighter or blockade runner sitting in its own home sector can't set up a trade route. Routes can still end at your home, and an enemy home works as a starting point.
+- **Ships you don't control block movement:** this rule was already in the engine. While choosing a move, any tile in range holding ships you don't control (another player's or pirates) gets an amber dashed outline and a ✋ badge. You can stop there, but you can't fly through it, so tiles beyond it are only reachable by another way round.
+- **Buy several copies:** Shipyard cards (Credits and the four basic ships) have a − / + copies selector in the buy dialog, up to what you can afford with your credits and the Credit cards in hand. Market row and scouted cards are single cards, so they stay one at a time.
 
 ## Rules decided where the design was silent or didn't fit the hex board
 

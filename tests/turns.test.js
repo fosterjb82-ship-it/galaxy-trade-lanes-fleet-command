@@ -6,7 +6,7 @@ import {
 import { reachable } from '../src/game/movement.js';
 import { hexDistance } from '../src/map/hex.js';
 
-const game = (n = 3, seed = 'TURN-1') => createGame({ missions: 'auto', seed, players: ['Ada', 'Bo', 'Cy', 'Di', 'Ed', 'Flo'].slice(0, n) });
+const game = (n = 3, seed = 'TURN-1') => createGame({ missions: 'auto', startingFreighter: false, seed, players: ['Ada', 'Bo', 'Cy', 'Di', 'Ed', 'Flo'].slice(0, n) });
 const find = (g, pid, def) => g.players[pid].hand.find((u) => g.cards[u].def === def);
 const act = (g, a) => applyAction(g, a);
 
@@ -146,7 +146,8 @@ test('ships must stop when entering a tile with enemy ships', () => {
   g = deployFighter(g, 0);
   const mine = shipsOf(g, 0)[0];
   // Put a pirate on a neighbouring open tile and check nothing beyond it is reached through it.
-  const pirate = g.ships.find((s) => s.owner === 'pirate');
+  const pirate = { id: 'sP', owner: 'pirate', type: 'pirate', tile: null, hull: 4, upgrades: [] };
+  g.ships.push(pirate);
   const open = reachable(g, mine);
   const step1 = [...open].find(([, r]) => r.path.length === 2 && g.map.nodes[r.path[1]].type === 'empty')[0];
   pirate.tile = step1;
