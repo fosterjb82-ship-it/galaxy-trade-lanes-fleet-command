@@ -25,6 +25,7 @@ import { tileDetails, tileTitle, row } from './details.js';
 import { loadGame, saveGame, clearGame } from './storage.js';
 import { soundMenu } from './soundmenu.js';
 import { buildBattle, playBattle } from './battle.js';
+import { nextAction as nextCpuAction, respond as respondCpu } from '../game/ai.js';
 import { sound } from '../audio/sound.js';
 
 const board0Animate = () => {
@@ -45,42 +46,65 @@ const BATTLE_VIEW_KEY = 'fleetcommand.battleview';
 function battleView() {
   try { return localStorage.getItem(BATTLE_VIEW_KEY) ?? 'always'; } catch { return 'always'; }
 }
+const CPU_SPEED_KEY = 'fleetcommand.cpuspeed';
+function cpuSpeed() {
+  try { return localStorage.getItem(CPU_SPEED_KEY) ?? 'normal'; } catch { return 'normal'; }
+}
 const TYPE_LABEL_SHORT = { trade: 'Trade node', key: 'Key planet', home: 'Home' };
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const CP_LABEL = { home: 'Home sector', key: 'Key planet', station: 'Station' };
 
 export function mountGame(root) {
   let state = loadGame();
-  if (!state || state.version !== 2) {
+  // Single player against CPU opponents: older hot-seat saves start over.
+  if (!state || state.version !== 2 || !state.players.some((p) => p.cpu)) {
     clearGame();
     location.hash = '';
     return;
   }
+  const HUMAN = state.players.findIndex((p) => !p.cpu);
   const costs = allCosts(state.map.nodes);
   // idle | deploy {card,tiles} | moveShip {card,tiles,pickFrom?} | moveDest {card,ship,routes}
   let mode = { kind: 'idle' };
   let openTile = null;
   let openShipId = null;
-  let concealed = true; // hand hidden until the active player confirms (hot-seat)
+  let locked = true; // true while it isn't your turn (CPU turns, dialogs waiting on you)
+  let cpuRunning = false;
+  let pendingAfter = () => {}; // what happens once a pending answer has been shown
+  let combatOwners = new Set(); // owners of the ships in the last fight
   let devOpen = false;
 
   // ---------------------------------------------------------- layout
   const roundLabel = h('span.round');
   const orderChips = h('div.turn-order');
   const toast = h('div.game-toast');
-  const topbar = h('header.topbar',
-    h('div.brand', h('h1', 'Fleet Command'), h('span.stage', state.settings?.length === 'quick' ? 'Quick game' : 'Hot-seat prototype')),
-    roundLabel, orderChips,
-    h('span.spacer'),
-    h('label.anim-toggle', { title: 'Show attacks as a short battle close-up' }, 'Battles',
-      h('select.battle-select', {
-        onchange: (e) => { try { localStorage.setItem(BATTLE_VIEW_KEY, e.target.value); } catch { /* ignore */ } },
-      }, [['always', 'Close-up'], ['kills', 'Close-up on kills'], ['off', 'Board only']].map(([v, l]) => h('option', { value: v, selected: battleView() === v }, l)))),
-    h('label.anim-toggle', { title: 'Animations and ambient motion' },
-      h('input', {
+  /** ⚙ Options: animations, battle close-ups and CPU speed, in one popover. */
+  function optionsMenu() {
+    const select = (key, value, options, onPick) => h('select.battle-select', {
+      onchange: (e) => { try { localStorage.setItem(key, e.target.value); } catch { /* ignore */ } onPick?.(e.target.value); },
+    }, options.map(([v, l]) => h('option', { value: v, selected: value === v }, l)));
+    const panel = h('div.sound-panel', { role: 'dialog', 'aria-label': 'Options' },
+      h('label.sound-row.master', h('b', 'Options')),
+      h('label.sound-row', h('input', {
         type: 'checkbox', checked: board0Animate(),
         onchange: (e) => { setAnimationsEnabled(e.target.checked); board.setAnimate(e.target.checked); document.body.classList.toggle('still', !e.target.checked); },
       }), 'Animations'),
+      h('div.sound-group', h('span.small.muted', 'Battles'),
+        select(BATTLE_VIEW_KEY, battleView(), [['always', 'Close-up every attack'], ['kills', 'Close-up on kills only'], ['off', 'Board only']])),
+      h('div.sound-group', h('span.small.muted', 'CPU speed'),
+        select(CPU_SPEED_KEY, cpuSpeed(), [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']])),
+      h('p.muted.small', 'Close-ups only play for fights involving your ships.'));
+    const wrap = h('div.sound-menu', h('button', { type: 'button', onclick: (e) => { e.stopPropagation(); wrap.classList.toggle('open'); } }, '⚙ Options'), panel);
+    panel.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', () => wrap.classList.remove('open'));
+    return wrap;
+  }
+
+  const topbar = h('header.topbar',
+    h('div.brand', h('h1', 'Fleet Command'), h('span.stage', `${state.settings?.length === 'quick' ? 'Quick game' : 'Standard game'} · you vs ${plural(state.players.length - 1, 'CPU')}`)),
+    roundLabel, orderChips,
+    h('span.spacer'),
+    optionsMenu(),
     soundMenu(),
     h('a.button', { href: `#lab&seed=${encodeURIComponent(state.mapSeed)}&players=${state.players.length}` }, 'Map Lab'),
     h('button', {
@@ -168,12 +192,16 @@ export function mountGame(root) {
       const cue = ACTION_SOUND[action.type];
       if (cue) sound.sfx(cue);
       let events = state.fx ?? [];
+      if (state.lastCombat && state.lastCombat !== prev.lastCombat) {
+        const owner = (id) => (prev.ships.find((x) => x.id === id) ?? state.ships.find((x) => x.id === id))?.owner;
+        combatOwners = new Set([owner(state.lastCombat.attacker), owner(state.lastCombat.target)]);
+      }
       // Attacks and reactions: replay the fight as a close-up instead of on the board.
       pendingBattle = null;
       if (['attack', 'react'].includes(action.type) && state.lastCombat && !state.pending) {
         const battle = buildBattle(prev, state, state.lastCombat, events);
         const view = battleView();
-        if (battle && (view === 'always' || (view === 'kills' && battle.destroyed))) {
+        if (battle && combatOwners.has(HUMAN) && (view === 'always' || (view === 'kills' && battle.destroyed))) {
           pendingBattle = { battle, result: state.lastCombat };
           const fighters = new Set([state.lastCombat.attacker, state.lastCombat.target]);
           events = events.filter((e) => !((e.kind === 'shot' && fighters.has(e.shooter)) || (e.kind === 'explode' && fighters.has(e.ship))));
@@ -199,10 +227,10 @@ export function mountGame(root) {
     render();
   }
 
-  const me = () => state.players[state.active];
+  const me = () => state.players[HUMAN];
 
   function clickCard(uid) {
-    if (concealed) return;
+    if (locked) return;
     const defId = state.cards[uid].def;
     const def = cardDef(state.cards[uid]);
     if (mode.card === uid) return setMode({ kind: 'idle' });
@@ -330,11 +358,11 @@ export function mountGame(root) {
   }
 
   /** After an attack or move: a defender may need to respond, or show the report. */
-  function afterCombatAction() {
+  function afterCombatAction(after = () => {}) {
     fxp.whenIdle(() => {
-      if (state.pending) return defenderHandoff();
-      if (state.lastCombat) combatReport(state.lastCombat);
-      return null;
+      if (state.pending) return resolvePending(after);
+      if (state.lastCombat) return combatReport(state.lastCombat, after);
+      return after();
     });
   }
 
@@ -399,7 +427,7 @@ export function mountGame(root) {
 
   function missionTipFor(id) {
     const p = me();
-    const held = !concealed && p.missions.find((m) => m.id === id);
+    const held = p.missions.find((m) => m.id === id);
     if (!held) return missionTip(id);
     return missionTip(id, held.scored ? 'Complete' : missionProgressText(state, p, id), held.scored ? `Scored +${MISSIONS[id].vp} VP` : null);
   }
@@ -421,7 +449,7 @@ export function mountGame(root) {
     const r = canvas.getBoundingClientRect();
     const tile = board.tileAt({ x: (e.clientX - r.left) * board.dpr, y: (e.clientY - r.top) * board.dpr });
     const sh = shipUnder(tile, e);
-    if (mode.kind === 'attackTarget' && !concealed) {
+    if (mode.kind === 'attackTarget' && !locked) {
       tips.hide();
       const opt = sh && bestOptions(mode.options).get(sh.id);
       if (!opt) return hideTargetPreview();
@@ -435,7 +463,9 @@ export function mountGame(root) {
   canvas.addEventListener('pointerleave', () => { tips.hide(); hideTargetPreview(); });
 
   board.on('click', (tile, e) => {
-    if (concealed || fxp.isBusy()) return;
+    if (fxp.isBusy()) return;
+    if (locked && tile !== null && mode.kind === 'idle') return openDetails(tile); // look around during CPU turns
+    if (locked) return;
     if (tile === null) {
       if (mode.kind !== 'idle') return setMode({ kind: 'idle' });
       return closeDetails();
@@ -496,7 +526,7 @@ export function mountGame(root) {
       if (dispatch({ type: 'move', player: state.active, card, ship, tile })) {
         const events = state.lastMove?.events ?? [];
         say(events.length ? events.join(' ') : `Moved to ${tileName(state, tile)} (${route.cost} movement).`);
-        if (state.pending) fxp.whenIdle(defenderHandoff);
+        if (state.pending) fxp.whenIdle(() => resolvePending());
         else {
           const s = state.ships.find((x) => x.id === ship);
           if (s && isTrader(s) && routeOptions(state, s).length && !state.routes.some((r) => r.ship === s.id)) {
@@ -569,7 +599,7 @@ export function mountGame(root) {
     const def = shipDef(ship);
     const st = shipStats(state, ship);
     const color = pirate ? PIRATE_COLOR : PLAYER_COLORS[ship.owner];
-    const mine = !pirate && ship.owner === state.active && !concealed && state.phase === 'action';
+    const mine = !pirate && ship.owner === state.active && !locked && state.phase === 'action';
     const slots = def.slots ?? 0;
     const route = state.routes.find((r) => r.ship === id);
     const weapons = st.weapons.length
@@ -726,7 +756,7 @@ export function mountGame(root) {
   }
 
   function endTurnDialog() {
-    if (concealed) return;
+    if (locked) return;
     const p = me();
     const keep = new Set();
     const list = h('div.keep-cards');
@@ -748,14 +778,9 @@ export function mountGame(root) {
       hideOverlay();
       mode = { kind: 'idle' };
       closeDetails();
-      concealed = true; // hide this hand before the next player's state renders
-      if (!dispatch({ type: 'endTurn', player: p.id, keep: [...keep] })) {
-        concealed = false;
-        render();
-        return;
-      }
-      if (state.rounds.length !== roundsBefore) fxp.whenIdle(() => roundSummary(state.rounds.at(-1)));
-      else fxp.whenIdle(handoff);
+      if (!dispatch({ type: 'endTurn', player: p.id, keep: [...keep] })) return;
+      if (state.rounds.length !== roundsBefore) fxp.whenIdle(() => roundSummary(state.rounds.at(-1), nextTurn));
+      else fxp.whenIdle(nextTurn);
     };
     renderKeep();
     showOverlay([
@@ -769,7 +794,7 @@ export function mountGame(root) {
     ].filter(Boolean));
   }
 
-  function roundSummary(rs) {
+  function roundSummary(rs, then = nextTurn) {
     sound.sfx('round');
     const ranked = [...state.players].sort((a, b) => b.vp - a.vp);
     const end = rs.ending ?? { chance: 0 };
@@ -807,7 +832,7 @@ export function mountGame(root) {
       !over && nextChance > 0 && h('p.muted.small', `After round ${state.round}: ${END_ODDS_LABEL[nextChance]} chance the game ends.`),
       h('div.dialog-actions', over
         ? h('button.primary.big', { onclick: finalScreen }, 'Final scoring')
-        : h('button.primary.big', { onclick: handoff }, `Start round ${state.round}`)),
+        : h('button.primary.big', { onclick: () => { hideOverlay(); then(); } }, `Start round ${state.round}`)),
     ]);
   }
 
@@ -820,7 +845,6 @@ export function mountGame(root) {
   }
 
   function finalScreen() {
-    concealed = false;
     sound.sfx('victory');
     const f = state.final;
     const rows = f.ranking.map((r) => {
@@ -926,6 +950,11 @@ export function mountGame(root) {
   }
 
   function combatReport(result, after = null) {
+    if (!combatOwners.has(HUMAN)) { // CPU against CPU (or pirates): no pop-up
+      if (result?.events?.length) say(result.events.at(-1));
+      pendingBattle = null;
+      return after?.();
+    }
     if (pendingBattle && pendingBattle.result === result) {
       const { battle } = pendingBattle;
       pendingBattle = null;
@@ -945,33 +974,31 @@ export function mountGame(root) {
     ]);
   }
 
-  /** Public announcement, then hand the device to the defender. */
-  function defenderHandoff() {
-    concealed = true;
-    render();
+  /**
+   * Something needs an answer from the defender: an attack (reactions), an
+   * enemy arriving (ambush) or a trade offer. You answer yours in a dialog;
+   * CPU players answer at once. `after` runs once the result has been shown.
+   */
+  function resolvePending(after = () => {}) {
     const pend = state.pending;
-    const d = state.players[pend.defender];
-    const c = PLAYER_COLORS[d.id];
-    const attackerName = me().name;
-    let what;
-    if (pend.kind === 'offer') {
-      what = `${attackerName} offers ${d.name} a trade agreement: +1 credit per turn and 1 VP per round each, while you both run a trade route.`;
-    } else if (pend.kind === 'reaction') {
-      const atk = state.ships.find((s) => s.id === pend.attack.attacker);
-      const tgt = state.ships.find((s) => s.id === pend.attack.target);
-      what = `${attackerName}'s ${SHIPS[atk.type].name.toLowerCase()} attacks ${d.name}'s ${SHIPS[tgt.type].name.toLowerCase()}: ${describeDamage(pend.preview)} damage unless ${d.name} reacts.`;
-    } else {
-      const mv = state.ships.find((s) => s.id === pend.mover);
-      what = `${attackerName}'s ${SHIPS[mv.type].name.toLowerCase()} moves onto ${tileTitle(state.map.nodes[pend.tile])}, where ${d.name} has ships.`;
+    if (!pend) return after();
+    pendingAfter = after;
+    if (pend.defender === HUMAN) {
+      sound.sfx(pend.kind === 'offer' ? 'turn' : 'error');
+      return pend.kind === 'offer' ? offerDialog() : reactionDialog();
     }
-    showOverlay(h('div.handoff',
-      h('div.kicker', { reaction: 'Incoming attack', ambush: 'Enemy arrival', offer: 'Trade offer' }[pend.kind]),
-      h('h2', { style: { color: c.light } }, `Pass the device to ${d.name}`),
-      h('p', what),
-      pend.kind === 'offer'
-        ? h('p.muted', `${d.name}, decide in private.`)
-        : h('p.muted', `${d.name} holds ${d.reserve.length} card${d.reserve.length === 1 ? '' : 's'} and may respond. ${attackerName}, look away.`),
-      h('button.primary.big', { style: { background: c.dark, borderColor: c.main }, onclick: pend.kind === 'offer' ? offerDialog : reactionDialog }, `I'm ${d.name}: respond`)));
+    // A CPU defender decides.
+    const from = pend.kind === 'offer' ? state.players[pend.from] : null;
+    const answer = respondCpu(state, pend.defender);
+    if (!dispatch(answer)) dispatch({ ...answer, card: null, accept: false });
+    if (pend.kind === 'offer') {
+      const d = state.players[pend.defender];
+      const ok = state.agreements.some((a) => (a.a === from.id && a.b === d.id) || (a.b === from.id && a.a === d.id));
+      say(ok ? `${d.name} accepts: trade agreement signed.` : `${d.name} declines the trade agreement.`, ok ? 'info' : 'error');
+      return after();
+    }
+    const result = state.lastCombat ?? { events: [`${state.players[pend.defender].name} lets the ship pass.`] };
+    return fxp.whenIdle(() => combatReport(result, after));
   }
 
   function offerDialog() {
@@ -984,7 +1011,7 @@ export function mountGame(root) {
         h('div.kicker', 'Trade offer'),
         h('h2', accept ? 'Agreement signed' : 'Offer declined'),
         h('p', accept ? `${from.name} and ${d.name} now each earn +1 credit per turn and 1 VP per round while both run a trade route.` : `${d.name} declined ${from.name}'s offer.`),
-        h('div.dialog-actions', h('button.primary.big', { onclick: handoff }, `Back to ${from.name}`)),
+        h('div.dialog-actions', h('button.primary.big', { onclick: () => { hideOverlay(); render(); pendingAfter(); } }, 'Continue')),
       ]);
     };
     showOverlay([
@@ -1055,41 +1082,95 @@ export function mountGame(root) {
     const defender = state.pending.defender;
     if (!dispatch({ type: 'react', player: defender, card, tile, ship })) return;
     const result = state.lastCombat ?? { events: [`${state.players[defender].name} lets the ship pass.`] };
-    // Hand back to the attacker with the public result, after the effects.
     hideOverlay();
-    fxp.whenIdle(() => combatReport(result, () => handoff()));
+    fxp.whenIdle(() => combatReport(result, pendingAfter));
   }
 
-  function handoff() {
-    if (state.phase === 'over') return finalScreen();
-    concealed = true;
-    seenHand = new Set(); // the next player's whole hand deals in on reveal
-    render();
+  /** Start whoever's turn it is now: you, or a CPU opponent. */
+  function nextTurn() {
+    hideOverlay();
+    if (state.phase === 'over') { render(); return finalScreen(); }
+    if (state.pending) return resolvePending(nextTurn);
+    if (startFx.length) {
+      fxp.play(startFx, startFx.prev ?? state, state);
+      startFx = [];
+    }
+    if (state.players[state.active].cpu) return runCpuTurn();
     const p = me();
-    const c = PLAYER_COLORS[p.id];
+    locked = false;
+    seenHand = new Set(); // your new hand deals in
+    render();
     sound.sfx('turn');
-    showOverlay([
-      h('div.handoff',
-        spriteIcon(`home:${p.id}`, 64),
-        h('div.kicker', `Round ${state.round}`),
-        h('h2', { style: { color: c.light } }, `Pass the device to ${p.name}`),
-        h('p.muted', 'Everyone else, look away: your hand is about to be shown.'),
-        h('button.primary.big', {
-          style: { background: c.dark, borderColor: c.main },
-          onclick: () => {
-            concealed = false;
-            hideOverlay();
-            render();
-            if (startFx.length) {
-              fxp.play(startFx, startFx.prev ?? state, state);
-              startFx = [];
-            }
-            const ev = state.turnStart?.player === p.id ? state.turnStart.events : [];
-            if (ev?.length) say(`Start of turn: ${ev.join(' ')}`);
-            if (p.missionOffer.length) missionDialog();
-          },
-        }, `I'm ${p.name}: show my hand`)),
-    ]);
+    const ev = state.turnStart?.player === p.id ? state.turnStart.events : [];
+    say(ev?.length ? `Your turn. ${ev.join(' ')}` : 'Your turn.');
+    if (p.missionOffer.length) missionDialog();
+  }
+
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const idle = () => new Promise((r) => fxp.whenIdle(r));
+  const until = (fn) => new Promise((r) => fn(r));
+
+  /** Play a CPU opponent's whole turn, one animated action at a time. */
+  async function runCpuTurn() {
+    if (cpuRunning) return;
+    cpuRunning = true;
+    locked = true;
+    const pid = state.active;
+    const cpu = state.players[pid];
+    mode = { kind: 'idle' };
+    render();
+    sound.sfx('turn');
+    let count = 0;
+    try {
+      while (state.phase === 'action' && state.active === pid) {
+        await idle();
+        await wait(cpuDelay());
+        while (overlay.classList.contains('show')) await wait(150); // e.g. a mission reveal you haven't closed yet
+        if (state.pending) { await until((r) => resolvePending(r)); continue; }
+        let action = nextCpuAction(state, pid);
+        if (++count > 60) action = { type: 'endTurn', player: pid, keep: [] }; // safety net
+        const roundsBefore = state.rounds.length;
+        const before = state;
+        if (!dispatch(action)) {
+          dispatch({ type: 'endTurn', player: pid, keep: [] });
+        } else narrate(cpu, action, before);
+        if (['attack', 'move', 'offerAgreement'].includes(action.type)) {
+          await idle();
+          if (state.pending) await until((r) => resolvePending(r));
+          else if (action.type === 'attack' && state.lastCombat) await until((r) => combatReport(state.lastCombat, r));
+        }
+        if (state.rounds.length !== roundsBefore) {
+          await idle();
+          if (state.phase === 'over') break;
+          await until((r) => roundSummary(state.rounds.at(-1), r));
+        }
+      }
+    } finally {
+      cpuRunning = false;
+    }
+    nextTurn();
+  }
+
+  function cpuDelay() {
+    return { slow: 1100, normal: 650, fast: 220 }[cpuSpeed()] ?? 650;
+  }
+
+  /** Say what a CPU player just did. */
+  function narrate(cpu, a, before) {
+    const tname = (t) => tileTitle(state.map.nodes[t]);
+    const shipName = (id, st = state) => { const sh = st.ships.find((x) => x.id === id); return sh ? (sh.owner === 'pirate' ? 'pirate fleet' : SHIPS[sh.type].name.toLowerCase()) : 'ship'; };
+    const whose = (id) => { const sh = before.ships.find((x) => x.id === id); return sh?.owner === HUMAN ? 'your' : sh?.owner === 'pirate' ? 'a' : `${state.players[sh?.owner]?.name ?? ''}'s`; };
+    let text = null;
+    if (a.type === 'deploy') text = `${cpu.name} deploys a ${CARDS[before.cards[a.card].def].name.toLowerCase()} at ${tname(a.tile)}.`;
+    else if (a.type === 'move') text = `${cpu.name} moves a ${shipName(a.ship, before)} to ${tname(a.tile)}.`;
+    else if (a.type === 'attack') text = `${cpu.name}'s ${shipName(a.ship, before)} attacks ${whose(a.target)} ${shipName(a.target, before)}!`;
+    else if (a.type === 'buy') text = `${cpu.name} buys ${CARDS[before.cards[a.def]?.def ?? a.def].name}.`;
+    else if (a.type === 'establishRoute') text = `${cpu.name} sets up a trade route to ${tname(a.to)}.`;
+    else if (a.type === 'playUpgrade') text = `${cpu.name} fits ${CARDS[before.cards[a.card].def].name} to a ${shipName(a.ship)}.`;
+    else if (a.type === 'repair') text = `${cpu.name} repairs a ${shipName(a.ship)}.`;
+    else if (a.type === 'scout') text = `${cpu.name} scouts the market.`;
+    else if (a.type === 'endTurn') text = `${cpu.name} ends their turn.`;
+    if (text) say(text);
   }
 
   // ---------------------------------------------------------- render
@@ -1102,10 +1183,11 @@ export function mountGame(root) {
     orderChips.replaceChildren(...order.map((pid, i) => {
       const done = i < state.turnInRound;
       const pl = state.players[pid];
-      return h(`span.order-chip${pid === p.id ? '.now' : ''}${done ? '.done' : ''}`, {
+      const now = pid === state.active && state.phase === 'action';
+      return h(`span.order-chip${now ? '.now' : ''}${done ? '.done' : ''}`, {
         style: { borderColor: PLAYER_COLORS[pid].main, color: PLAYER_COLORS[pid].light },
-        title: done ? `${pl.name} has played this round` : pid === p.id ? `${pl.name}'s turn` : `${pl.name} plays later this round`,
-      }, pl.name, h('b', `${pl.vp} VP`));
+        title: `${pl.name}${pl.cpu ? ' (CPU)' : ' (you)'}: ${done ? 'has played this round' : now ? 'playing now' : 'plays later this round'}`,
+      }, pl.cpu ? '' : '★ ', pl.name, h('b', `${pl.vp} VP`));
     }));
     renderModeBar();
     renderHand(p);
@@ -1234,11 +1316,7 @@ export function mountGame(root) {
   }
 
   function renderHand(p) {
-    if (concealed) {
-      handBar.replaceChildren(h('div.hand-hidden', h('span', `${p.name}'s hand is hidden.`),
-        h('button.primary', { onclick: handoff }, `Show ${p.name}'s hand`)));
-      return;
-    }
+    const cpuTurn = state.phase === 'action' && state.active !== HUMAN;
     let dealt = 0;
     const cards = p.hand.map((uid) => {
       const defId = state.cards[uid].def;
@@ -1279,18 +1357,20 @@ export function mountGame(root) {
     handBar.replaceChildren(
       h('div.hand-label',
         h('div', { style: { color: PLAYER_COLORS[p.id].light } }, h('b', p.name)),
-        h('div.credits', { title: 'Credits to spend this turn' }, spriteIcon('card:credit', 16), h('b', p.credits), 'credits'),
-        h('div.muted.small', `${p.played.length} card${p.played.length === 1 ? '' : 's'} played`)),
+        cpuTurn
+          ? h('div.cpu-turn', { style: { color: PLAYER_COLORS[state.active].light } }, h('span.cpu-dot'), `${state.players[state.active].name} is playing…`)
+          : h('div.credits', { title: 'Credits to spend this turn' }, spriteIcon('card:credit', 16), h('b', p.credits), 'credits'),
+        h('div.muted.small', cpuTurn ? 'Your hand, for your next turn' : `${p.played.length} card${p.played.length === 1 ? '' : 's'} played`)),
       h('div.hand-cards', cards.length ? cards : h('div.muted', 'No cards left in hand.')),
       h('div.piles',
         h('button.pile', { type: 'button', title: 'View your deck: draw pile, discard pile and cards on the board', onclick: () => deckDialog('deck') }, h('b', p.deck.length), h('span', 'Deck')),
         h('button.pile', { type: 'button', title: 'View your discard pile', onclick: () => deckDialog('discard') }, h('b', p.discard.length), h('span', 'Discard'))),
-      h('button.end-turn', { onclick: endTurnDialog, disabled: state.phase === 'over' }, state.phase === 'over' ? 'Game over' : 'End turn'));
+      h('button.end-turn', { onclick: endTurnDialog, disabled: state.phase === 'over' || locked }, state.phase === 'over' ? 'Game over' : cpuTurn ? 'Opponents\' turn' : 'End turn'));
+    handBar.classList.toggle('waiting', cpuTurn);
   }
 
   /** Every card the active player owns, by where it is. */
   function deckDialog(focus = 'deck') {
-    if (concealed) return say('Show your hand first.', 'error');
     const p = me();
     const TYPE_ORDER = ['credit', 'command', 'ship', 'upgrade', 'reaction', 'utility'];
     const group = (uids) => {
@@ -1345,7 +1425,7 @@ export function mountGame(root) {
   function tableCard(defId, uid, p) {
     const card = CARDS[defId];
     const price = buyPrice(state, p.id, defId);
-    const afford = !concealed && state.phase === 'action' && p.credits + handCredits(state, p.id) >= price;
+    const afford = !locked && state.phase === 'action' && p.credits + handCredits(state, p.id) >= price;
     const kind = card.upgradeKind ? `${card.upgradeKind} upgrade` : TYPE_WORD[card.type];
     const scouted = uid && p.scout === uid;
     return h(`button.tcard.type-${card.type}${afford ? '' : '.cant'}${scouted ? '.scouted' : ''}`, {
@@ -1371,8 +1451,8 @@ export function mountGame(root) {
     qty = Math.max(1, Math.min(qty, maxQty));
     const price = each * qty;
     let why = null;
-    const pay = !concealed && p.credits < price ? autoPayCards(state, p.id, price - p.credits) : [];
-    if (concealed) why = `Show ${p.name}'s hand first.`;
+    const pay = !locked && p.credits < price ? autoPayCards(state, p.id, price - p.credits) : [];
+    if (locked) why = 'Wait for your turn.';
     else if (state.phase !== 'action') why = 'The game is over.';
     else if (!pay) why = `This costs ${price}. You have ${p.credits} credit${p.credits === 1 ? '' : 's'}${inHand ? ` and ${inHand} more in Credit cards` : ''}.`;
     const payNote = pay?.length
@@ -1385,7 +1465,7 @@ export function mountGame(root) {
         say(qty > 1 ? `Bought ${qty} × ${card.name}. They go to your discard pile.` : `Bought ${card.name}. It goes to your discard pile.`);
       }
     };
-    const stepper = shipyard && !concealed && state.phase === 'action' && h('div.qty',
+    const stepper = shipyard && !locked && state.phase === 'action' && h('div.qty',
       h('span.muted.small', 'Copies'),
       h('button.qty-btn', { 'aria-label': 'One fewer', disabled: qty <= 1, onclick: () => inspectCard(defId, uid, qty - 1) }, '−'),
       h('b.qty-n', qty),
@@ -1426,9 +1506,9 @@ export function mountGame(root) {
 
   /** The face-down market deck: flip its top card once per turn (Scout the market). */
   function scoutSlot(p) {
-    if (!concealed && p.scout) return tableCard(state.cards[p.scout].def, p.scout, p);
+    if (p.scout) return tableCard(state.cards[p.scout].def, p.scout, p);
     const used = p.scoutTurn === state.turnNumber;
-    const why = concealed ? 'Show your hand first'
+    const why = locked ? 'Wait for your turn'
       : state.phase !== 'action' ? 'The game is over'
         : used ? 'Already scouted this turn'
           : !state.market.deck.length ? 'The market deck is empty' : null;
@@ -1449,7 +1529,6 @@ export function mountGame(root) {
   }
 
   function tableCredits(p) {
-    if (concealed) return h('div.table-credits', spriteIcon('card:credit', 18), h('b', '–'), 'credits');
     const inHand = handCredits(state, p.id);
     return h('div.table-credits', spriteIcon('card:credit', 18), h('b', p.credits), 'to spend',
       inHand > 0 && h('span.muted', `+ ${inHand} in hand`),
@@ -1479,7 +1558,7 @@ export function mountGame(root) {
         return h('div.route-setup',
           h('span.small', `${SHIPS[s.type].name} at ${tileTitle(state.map.nodes[s.tile])}:`),
           sel,
-          h('button', { disabled: concealed || !opts.length, onclick: () => { if (dispatch({ type: 'establishRoute', player: p.id, ship: s.id, to: Number(sel.value) })) say('Trade route set up: income arrives at the start of your turns.'); } },
+          h('button', { disabled: locked || !opts.length, onclick: () => { if (dispatch({ type: 'establishRoute', player: p.id, ship: s.id, to: Number(sel.value) })) say('Trade route set up: income arrives at the start of your turns.'); } },
             state.routes.some((r) => r.ship === s.id) ? 'Replace route' : 'Set up route'));
       }),
       h('div.deals',
@@ -1494,13 +1573,12 @@ export function mountGame(root) {
               ? h('span.small', active ? h('b', 'Active · +1/turn, 1 VP/round') : h('span.muted', 'Signed (inactive: a route is missing)'))
               : h('span.small.muted', why ?? 'Can offer'),
             ag
-              ? h('button.small-btn', { disabled: concealed, title: `Break it for a one-time ${BREAK_BONUS} credits`, onclick: () => askConfirm(`Break your agreement with ${o.name}?`, `You gain ${BREAK_BONUS} credits once. You both lose the +1 credit per turn and 1 VP per round.`, 'Break agreement', () => dispatch({ type: 'breakAgreement', player: p.id, with: o.id })) }, 'Break')
-              : h('button.small-btn', { disabled: concealed || Boolean(why), onclick: () => { if (dispatch({ type: 'offerAgreement', player: p.id, to: o.id })) defenderHandoff(); } }, 'Offer'));
+              ? h('button.small-btn', { disabled: locked, title: `Break it for a one-time ${BREAK_BONUS} credits`, onclick: () => askConfirm(`Break your agreement with ${o.name}?`, `You gain ${BREAK_BONUS} credits once. You both lose the +1 credit per turn and 1 VP per round.`, 'Break agreement', () => dispatch({ type: 'breakAgreement', player: p.id, with: o.id })) }, 'Break')
+              : h('button.small-btn', { disabled: locked || Boolean(why), onclick: () => { if (dispatch({ type: 'offerAgreement', player: p.id, to: o.id })) resolvePending(); } }, 'Offer'));
         })));
   }
 
   function missionPanel(p) {
-    if (concealed) return h('p.muted.small', 'Hidden until you show your hand.');
     if (p.missionOffer.length) return h('button.primary', { onclick: missionDialog }, 'Choose your 2 secret missions');
     return h('ul.missions', p.missions.map((m) => {
       const def = MISSIONS[m.id];
@@ -1552,7 +1630,7 @@ export function mountGame(root) {
         h('thead', h('tr', h('th', 'Player'), h('th', 'VP'), h('th', 'CP'), h('th', 'Ships'), h('th', { title: 'Cards held in reserve for reactions (public count)' }, 'Held'), h('th', { title: 'Secret missions: scored / held' }, 'Missions'))),
         h('tbody', state.players.map((pl) => {
           const m = cpMeter(pl.id);
-          return h(`tr${pl.id === p.id ? '.active' : ''}`,
+          return h(`tr${pl.id === state.active ? '.active' : ''}`,
             h('td', h('span.swatch', { style: { background: PLAYER_COLORS[pl.id].main } }), pl.name),
             h('td', pl.vp), h('td', `${m.used}/${m.cap.total}`), h('td', shipsOf(state, pl.id).length),
             h('td', pl.id === p.id ? '—' : pl.reserve.length),
@@ -1573,10 +1651,8 @@ export function mountGame(root) {
 
   render();
   if (state.phase === 'over') finalScreen();
-  else if (state.pending) defenderHandoff();
-  else handoff();
+  else nextTurn();
   window.fleetCommand = {
     get state() { return state; }, board, dispatch, openDetails,
-    reveal: () => { concealed = false; hideOverlay(); render(); },
   };
 }

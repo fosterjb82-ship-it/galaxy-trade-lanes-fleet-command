@@ -32,7 +32,7 @@ const TYPE_RULES = {
   reaction: [
     'Keep it at the end of your turn: kept cards are held face down, and opponents only see how many.',
     'Play it on an opponent\'s turn, after an attack on one of your ships is declared and before damage. Only one reaction per attack.',
-    'Against pirates (no prompt): if a pirate hit would destroy your ship, Retreat, Emergency Shields or Evasive Maneuvers in your reserve is played for you, in that order, whichever saves it.',
+    'Against pirates (no prompt, played for you): Ambush when a pirate moves onto your armed ship\'s tile; Retreat, Emergency Shields or Evasive Maneuvers if a hit would destroy your ship; Return Fire after a hit your ship survives. Point Defense never applies: pirates fire lasers.',
   ],
   utility: [],
 };

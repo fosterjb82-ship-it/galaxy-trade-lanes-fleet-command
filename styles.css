@@ -1084,3 +1084,13 @@ button.pile:hover { border-color: var(--accent); color: var(--text); }
 .mini-count { position: absolute; top: 4px; right: 4px; z-index: 1; background: #ffd166; color: #2a1d00; font-weight: 800; font-size: 12px; padding: 1px 6px; border-radius: 999px; }
 .deck-ships { display: flex; flex-direction: column; gap: 10px; }
 .deck-ship .linkish { margin-bottom: 4px; }
+
+/* ---------------------------------------------------------------- single player */
+
+.name-row.cpu { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.cpu-turn { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 13px; }
+.cpu-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: cpu-pulse 0.9s ease-in-out infinite alternate; }
+@keyframes cpu-pulse { from { opacity: 0.3; transform: scale(0.8); } to { opacity: 1; transform: scale(1.15); } }
+body.still .cpu-dot { animation: none; }
+.hand-bar.waiting .hand-cards { opacity: 0.55; filter: saturate(0.7); }
+.sound-group .battle-select { width: 100%; padding: 4px 6px; }

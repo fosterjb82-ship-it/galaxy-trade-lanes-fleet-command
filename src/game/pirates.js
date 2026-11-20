@@ -1,8 +1,10 @@
 // End-of-round pirate phase: each neutral pirate fleet moves 1 tile toward
 // the nearest freighter or blockade runner, then attacks a player ship on
 // its tile (traders first, then the most damaged). Pirates are automated, so
-// defenders don't get a prompt: if the hit would destroy the ship, a reaction
-// held in reserve (Retreat, Emergency Shields, Evasive) is played for them.
+// defenders don't get a prompt. Reactions held in reserve are played for them:
+// Ambush when a pirate arrives, Retreat / Emergency Shields / Evasive when a
+// hit would destroy the ship, and Return Fire after a hit it survives.
+// (Point Defense only stops missiles, and pirates fire lasers.)
 
 import { tileGraph } from '../map/generator.js';
 import { bfs } from '../map/graph.js';
@@ -22,9 +24,10 @@ function adjFor(map) {
  * @param {(name: string) => string} label  ship description for the log
  * @param {(pirate) => boolean} onArrive  called after a move; false if the pirate was destroyed
  * @param {(victim, pirate, events) => ({ miss?: boolean, opts?: object }|null)} onDefend  reaction for a lethal hit
+ * @param {(victim, pirate, events) => void} onSurvive  after a hit the ship survived (Return Fire)
  * @returns {string[]} events
  */
-export function piratePhase(state, destroyShip, label, onArrive = () => true, onDefend = () => null) {
+export function piratePhase(state, destroyShip, label, onArrive = () => true, onDefend = () => null, onSurvive = () => {}) {
   const events = [];
   const adj = adjFor(state.map);
   const pirates = state.ships.filter((s) => s.owner === 'pirate').map((s) => s.id);
@@ -43,7 +46,7 @@ export function piratePhase(state, destroyShip, label, onArrive = () => true, on
           (state.fx ??= []).push({ kind: 'move', ship: pirate.id, path: [pirate.tile, step], nebulas: [] });
           pirate.tile = step;
           events.push(`A pirate fleet moves toward ${label(target)}.`);
-          if (!onArrive(pirate)) continue; // shot down by home defences
+          if (!onArrive(pirate, events)) continue; // shot down (home defences or an ambush)
         }
       }
     }
@@ -52,10 +55,14 @@ export function piratePhase(state, destroyShip, label, onArrive = () => true, on
     const victim = victims.sort((a, b) => (isTrader(b) - isTrader(a)) || a.hull - b.hull)[0];
     const ps = shipStats(state, pirate);
     let r = damageFor(ps.weapons[0], ps, shipStats(state, victim));
+    let reacted = false;
     if (r.damage >= victim.hull) {
       const react = onDefend(victim, pirate, events);
       if (react?.miss) continue;
-      if (react?.opts) r = damageFor(ps.weapons[0], ps, shipStats(state, victim), react.opts);
+      if (react?.opts) {
+        r = damageFor(ps.weapons[0], ps, shipStats(state, victim), react.opts);
+        reacted = true;
+      }
     }
     (state.fx ??= []).push({
       kind: 'shot', from: pirate.tile, to: victim.tile, weapon: ps.weapons[0].type, damage: r.damage, ion: false,
@@ -67,7 +74,9 @@ export function piratePhase(state, destroyShip, label, onArrive = () => true, on
     if (victim.hull <= 0) {
       events.push(`${label(victim)} was destroyed by pirates.`);
       destroyShip(state, victim.id, { by: 'pirate', cause: 'by pirates' });
+      continue;
     }
+    if (!reacted) onSurvive(victim, pirate, events); // Return Fire (one reaction per attack)
   }
   return events;
 }
