@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, applyAction, controllerOf, cpCapacity, cpUsed, deployCheck, deployTiles, drawCards,
-  cardLocations, shipsOf, GameError,
+  cardLocations, shipsOf, GameError, pirateWarning,
 } from '../src/game/state.js';
 import { SHIPS } from '../src/game/ships.js';
 
 const NAMES = ['Ada', 'Bo', 'Cy', 'Di'];
-const newGame = (n = 4, seed = 'STATE-1') => createGame({ missions: 'auto', seed, players: NAMES.slice(0, n) });
+const newGame = (n = 4, seed = 'STATE-1') => createGame({ missions: 'auto', startingFreighter: false, seed, players: NAMES.slice(0, n) });
 const handDefs = (state, pid) => state.players[pid].hand.map((u) => state.cards[u].def);
 
 test('every player starts with the same 10-card deck and a hand of 5', () => {
@@ -186,11 +186,45 @@ test('carriers are mobile deploy points', () => {
   assert.equal(SHIPS.carrier.cp, 4);
 });
 
-test('pirates start on the board and never control tiles', () => {
-  const g = newGame();
-  const pirates = g.ships.filter((s) => s.owner === 'pirate');
-  assert.ok(pirates.length >= 2);
-  for (const p of pirates) assert.equal(controllerOf(g, p.tile), null);
+test('every player starts with a freighter at home, outside the deck', () => {
+  const g = createGame({ missions: 'auto', seed: 'FREIGHT-1', players: ['A', 'B', 'C'] });
+  for (const p of g.players) {
+    const ships = shipsOf(g, p.id);
+    assert.equal(ships.length, 1);
+    assert.equal(ships[0].type, 'freighter');
+    assert.equal(ships[0].tile, p.home);
+    assert.equal(g.cards[ships[0].card].def, 'ship-freighter');
+    assert.equal(cpUsed(g, p.id), 1);
+    assert.equal(p.deck.length + p.hand.length, 10, 'deck unchanged');
+  }
+  cardLocations(g);
+});
+
+test('no pirates at the start: they warp in at the end of the round before they arrive', () => {
+  for (const seed of ['PIR-A', 'PIR-B', 'PIR-C', 'PIR-D']) {
+    let g = createGame({ missions: 'auto', seed, players: ['A', 'B', 'C'] });
+    const wave = g.pirateWave;
+    assert.ok([3, 4].includes(wave.arrival));
+    assert.ok(wave.tiles.length >= 2);
+    assert.equal(g.ships.filter((s) => s.owner === 'pirate').length, 0);
+    assert.equal(pirateWarning(g), wave.arrival === 3 ? null : null);
+    const endRound = () => { const r = g.round; while (g.round === r) g = applyAction(g, { type: 'endTurn', player: g.active }); };
+    while (g.round < wave.arrival - 1) {
+      assert.equal(pirateWarning(g), null);
+      endRound();
+    }
+    // The round before they arrive: the warning shows where.
+    assert.deepEqual(pirateWarning(g), { round: wave.arrival, tiles: wave.tiles });
+    assert.equal(g.ships.filter((s) => s.owner === 'pirate').length, 0);
+    endRound();
+    const pirates = g.ships.filter((s) => s.owner === 'pirate');
+    assert.deepEqual(pirates.map((s) => s.tile).sort(), [...wave.tiles].sort());
+    assert.deepEqual(g.rounds.at(-1).arrivals, wave.tiles);
+    for (const p of pirates) assert.equal(controllerOf(g, p.tile), null, 'pirates never control tiles');
+    assert.equal(pirateWarning(g), null);
+    assert.equal(g.rounds.at(-1).pirates.length, 0, 'they arrive without acting');
+  }
+  assert.deepEqual(createGame({ seed: 'Q', players: ['A', 'B'], length: 'quick' }).pirateWave.arrival, 2);
 });
 
 test('state survives a JSON round trip', () => {

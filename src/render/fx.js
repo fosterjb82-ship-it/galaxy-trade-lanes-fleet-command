@@ -168,7 +168,7 @@ export class FxPlayer {
       } else if (e.kind === 'deploy') {
         const pos = slotPos(e.ship);
         this.hiddenUntil.set(e.ship, start + 230);
-        this.add(start, start + 520, (b, n, k) => this.drawWarp(b, pos, k, PLAYER_COLORS[e.owner].light));
+        this.add(start, start + 520, (b, n, k) => this.drawWarp(b, pos, k, e.owner === 'pirate' ? PIRATE_COLOR.light : PLAYER_COLORS[e.owner].light));
         this.at(start, () => sound.sfx('deploy'));
         t = start + 260;
       } else if (e.kind === 'repair') {

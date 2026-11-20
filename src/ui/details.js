@@ -109,7 +109,7 @@ export function tileDetails(o) {
       h('span', reveal ? HIDDEN_LABEL[node.hiddenContent] : 'Something is out here. It is revealed when a ship arrives.')),
     pirates.length > 0 && h('div.callout.danger',
       h('b', pirates.length > 1 ? `${pirates.length} neutral pirate fleets` : 'Neutral pirate fleet'),
-      h('span', `Hull ${pirates[0].hull} / ${pirates[0].maxHull} · Laser ${pirates[0].weapon}. From round 3, moves toward freighters at the end of each round.`)),
+      h('span', `Hull ${pirates[0].hull} / ${pirates[0].maxHull} · Laser ${pirates[0].weapon}. At the end of each round it moves toward the nearest freighter and attacks.`)),
     h('h3', 'Tile'),
     row('Movement to enter', cost === Infinity ? 'Impassable' : String(cost)),
     CP_VALUE[node.type] && row('Command Points', `+${CP_VALUE[node.type]} capacity`),

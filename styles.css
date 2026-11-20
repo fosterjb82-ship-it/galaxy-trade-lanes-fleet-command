@@ -907,3 +907,91 @@ body.still .tip { transition: none; }
 .sound-slider input:disabled { opacity: 0.4; }
 .sound-slider .pct { width: 36px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .setup-sound { position: fixed; top: 14px; right: 16px; z-index: 70; }
+
+/* ---------------------------------------------------------------- scout the market */
+
+.tcard.scout { border-style: dashed; border-color: #5a6aa0; }
+.tcard.scout:disabled { cursor: default; }
+.tcard.scout:disabled:hover { transform: none; box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45), 0 6px 14px rgba(0, 0, 0, 0.35); border-color: #5a6aa0; }
+.scout-back {
+  aspect-ratio: 1 / var(--card-art-aspect, 0.62);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  background:
+    repeating-linear-gradient(45deg, rgba(111, 227, 255, 0.07) 0 6px, transparent 6px 12px),
+    radial-gradient(circle at 50% 45%, #22306a, #0b1030 70%);
+  border: 1px solid #2c3a6e;
+}
+.scout-mark {
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--accent);
+  text-shadow: 0 0 12px rgba(111, 227, 255, 0.7);
+}
+.tcard.scout:not(:disabled):hover .scout-mark { animation: scout-pulse 0.9s ease-in-out infinite alternate; }
+@keyframes scout-pulse { to { text-shadow: 0 0 22px rgba(111, 227, 255, 1); transform: scale(1.1); } }
+.tcard.scouted { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(111, 227, 255, 0.35), 0 6px 14px rgba(0, 0, 0, 0.35); }
+.tcard.scouted .tc-kind::before { content: 'Scouted · '; color: var(--accent); }
+.table-credits .small-btn { margin-left: auto; }
+.pay-note { display: flex; align-items: center; gap: 6px; color: var(--gold); }
+
+/* ---------------------------------------------------------------- targeting */
+
+.target-preview {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 30;
+  width: 250px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #ff6b5e;
+  background: rgba(16, 10, 18, 0.95);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6), 0 0 18px rgba(255, 60, 60, 0.25);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.target-preview.show { opacity: 1; }
+.tp-head { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.tp-head .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.tp-kill {
+  margin-left: auto;
+  background: #ff3b3b;
+  color: #fff;
+  font-weight: 800;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  animation: tp-kill 0.6s ease-in-out infinite alternate;
+}
+@keyframes tp-kill { to { box-shadow: 0 0 12px #ff3b3b; } }
+.tp-hull { display: flex; align-items: center; gap: 3px; }
+.tp-hull .seg { width: 18px; height: 8px; border-radius: 2px; background: #3ddc84; }
+.tp-hull .seg.lose { background: #ff5d5d; animation: tp-lose 0.5s steps(2) infinite; }
+.tp-hull .seg.empty { background: rgba(255, 255, 255, 0.12); }
+@keyframes tp-lose { 50% { background: rgba(255, 93, 93, 0.25); } }
+.tp-hull-num { margin-left: 6px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tp-weapon { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); padding: 3px 6px; border-radius: 5px; }
+.tp-weapon span { text-transform: capitalize; }
+.tp-weapon.best { background: rgba(255, 107, 94, 0.14); color: var(--text); }
+.tp-note { color: #d6b3ff; }
+.tp-hint { color: var(--muted); font-size: 11px; }
+body.still .tp-kill, body.still .tp-hull .seg.lose { animation: none; }
+
+/* ---------------------------------------------------------------- battle close-up */
+
+.dialog.battle-dialog { max-width: 820px; width: min(820px, 94vw); }
+.battle h2 { margin: 4px 0 12px; }
+.battle-stage { position: relative; display: flex; justify-content: center; }
+.battle-canvas { border-radius: 10px; border: 1px solid var(--line); cursor: pointer; display: block; }
+.battle-lines { margin: 12px 0 0; }
+.battle .hidden { display: none !important; }
+.battle-select { font-size: 12px; padding: 2px 4px; }
+.pirate-callout { border-color: #ff4d4d; }

@@ -30,7 +30,12 @@ export const HOLDABLE = new Set(['home', 'key', 'station', 'trade', 'intersectio
 /** Damage an enemy ship takes when it ends a move in someone's home sector. */
 export const HOME_DEFENCE = 2;
 /** Pirates sit still for the opening rounds; the pirate phase starts this round. */
-export const PIRATE_START_ROUND = 3;
+export const PIRATE_START_ROUND = 3; // saves from before pirates arrived later
+/** Pirates warp in at the start of this round (rolled per game), with a round of warning. */
+export const PIRATE_ARRIVAL = { standard: [3, 4], quick: [2, 2] };
+
+/** The round pirates arrive and start hunting (their first pirate phase is at its end). */
+export const pirateRound = (state) => state.pirateWave?.arrival ?? PIRATE_START_ROUND;
 export const AGREEMENT_VP = 1;
 
 /** Chance the game ends after each round (DESIGN.md "Uncertain ending"). */
@@ -62,10 +67,9 @@ export class GameError extends Error {}
 /**
  * @param {{ seed: string, players: string[], mapSeed?: string }} opts
  */
-export function createGame({ seed, players, mapSeed = seed, length = 'standard', missions = 'draft' }) {
+export function createGame({ seed, players, mapSeed = seed, length = 'standard', missions = 'draft', startingFreighter = true }) {
   if (players.length < 2 || players.length > 6) throw new GameError('Fleet Command needs 2–6 players');
   const map = generateMap(mapSeed, players.length);
-  const pirates = map.pirates;
   const state = {
     version: 2,
     seed,
@@ -107,6 +111,8 @@ export function createGame({ seed, players, mapSeed = seed, length = 'standard',
       longestRoute: 0,
       bestSpend: 0,
       deepStrikeShips: [],
+      scout: null, // market card flipped by Scout the market this turn
+      scoutTurn: 0,
     })),
     cards: {},
     ships: [],
@@ -115,8 +121,16 @@ export function createGame({ seed, players, mapSeed = seed, length = 'standard',
     log: [],
   };
 
-  for (const p of pirates) {
-    state.ships.push({ id: `s${state.nextId++}`, owner: 'pirate', type: 'pirate', tile: p.node, hull: PIRATE.hull, upgrades: [] });
+  // No pirates at the start: they warp in at the map's pirate spots later.
+  state.pirateWave = {
+    arrival: withRng(state, (rng) => rng.pick(PIRATE_ARRIVAL[length] ?? PIRATE_ARRIVAL.standard)),
+    tiles: map.pirates.map((p) => p.node),
+    arrived: false,
+  };
+  // Every player starts with a freighter at home (its card returns to the discard pile if it is destroyed).
+  for (const player of startingFreighter ? state.players : []) {
+    const card = newCard(state, 'ship-freighter', player.id);
+    state.ships.push({ id: `s${state.nextId++}`, owner: player.id, type: 'freighter', tile: player.home, hull: SHIPS.freighter.hull, card, upgrades: [] });
   }
 
   withRng(state, (rng) => {
@@ -461,10 +475,11 @@ function endRound(state) {
   for (const sc of scores) {
     if (sc.vp) log(state, `${state.players[sc.player].name} scores ${sc.vp} VP (${sc.keys.length} key planet${sc.keys.length === 1 ? '' : 's'}, ${sc.agreements} agreement${sc.agreements === 1 ? '' : 's'}).`);
   }
-  const pirates = state.round >= PIRATE_START_ROUND
+  const pirates = state.round >= pirateRound(state)
     ? piratePhase(state, destroyShip, (sh) => shipLabel(state, sh), (sh) => homeDefence(state, sh, []))
     : [];
   for (const e of pirates) log(state, e);
+  const arrivals = pirateArrivals(state);
   updateControl(state);
   checkMissions(state);
 
@@ -472,7 +487,7 @@ function endRound(state) {
   const chance = END_CHANCE[state.settings?.length ?? 'standard'][state.round] ?? 0;
   const roll = chance > 0 ? withRng(state, (rng) => rng.next()) : null;
   const ends = chance >= 1 || (roll !== null && roll < chance);
-  state.rounds.push({ round: state.round, scores, pirates, ending: { chance, roll, ends } });
+  state.rounds.push({ round: state.round, scores, pirates, arrivals, ending: { chance, roll, ends } });
   if (chance > 0) log(state, ends ? 'Imperial Ceasefire! The war is over.' : `The ceasefire talks fail (${END_ODDS_LABEL[chance]} chance). The war goes on.`);
   if (ends) {
     finalScoring(state);
@@ -482,6 +497,27 @@ function endRound(state) {
   state.firstPlayer = (state.firstPlayer + 1) % state.players.length;
   state.turnInRound = 0;
   log(state, `Round ${state.round} begins. ${state.players[state.firstPlayer].name} goes first.`);
+}
+
+/** Pirates the round is about to bring: warp them in at the end of the round before they arrive. */
+function pirateArrivals(state) {
+  const wave = state.pirateWave;
+  if (!wave || wave.arrived || state.round < wave.arrival - 1) return [];
+  wave.arrived = true;
+  for (const tile of wave.tiles) {
+    const id = `s${state.nextId++}`;
+    state.ships.push({ id, owner: 'pirate', type: 'pirate', tile, hull: PIRATE.hull, upgrades: [] });
+    fx(state, { kind: 'deploy', ship: id, owner: 'pirate', tile });
+    log(state, `A pirate fleet warps in at ${tileName(state, tile)}.`);
+  }
+  return wave.tiles;
+}
+
+/** Tiles where pirates are about to warp in (shown on the board the round before). */
+export function pirateWarning(state) {
+  const wave = state.pirateWave;
+  if (!wave || wave.arrived || state.round < wave.arrival - 1) return null;
+  return { round: wave.arrival, tiles: wave.tiles };
 }
 
 /** Final scoring: reveal end-of-game missions, then rank with tiebreakers. */
@@ -674,6 +710,7 @@ function fire(state, shooter, weaponIndex, target, opts, events) {
   fx(state, {
     kind: 'shot', from: shooter.tile, to: target.tile, weapon: weapon.type, damage: report.damage, ion: report.ion,
     shooter: shooter.id, shooterOwner: shooter.owner, target: target.id,
+    raw: report.raw, shields: report.shields, armor: report.armor, evasive: report.evasive,
   });
   if (report.ion) {
     target.disabled = state.turnNumber;
@@ -695,7 +732,7 @@ function resolveAttack(state, atk, reaction, retreatTo) {
   const attacker = shipById(state, atk.attacker);
   const target = shipById(state, atk.target);
   const events = [];
-  const result = { attacker: atk.attacker, target: atk.target, reaction: reaction ? CARDS[reaction].name : null, events };
+  const result = { attacker: atk.attacker, target: atk.target, reaction: reaction ? CARDS[reaction].name : null, reactionDef: reaction ?? null, events };
   state.lastCombat = result;
   const r = reaction ? CARDS[reaction].reaction : null;
   if (reaction) events.push(`${state.players[target.owner].name} reacts with ${CARDS[reaction].name}!`);
@@ -783,6 +820,30 @@ const HANDLERS = {
     });
     fx(state, { kind: 'deploy', ship: state.ships.at(-1).id, tile, owner: player });
     log(state, `${p.name} deployed a ${SHIPS[def.ship].name.toLowerCase()} at ${state.map.nodes[tile].name ?? 'open space'}.`);
+  },
+
+  /** Play every Credit card in hand that needs no choice. */
+  playAllCredits(state, { player }) {
+    requireTurn(state, player);
+    const p = state.players[player];
+    const simple = p.hand.filter((u) => isSimpleCredit(state, u));
+    if (!simple.length) throw new GameError('No Credit cards to play (Smuggler\'s Cache needs you to pick a discard).');
+    for (const c of simple) {
+      p.hand.splice(p.hand.indexOf(c), 1);
+      p.played.push(c);
+      p.credits += cardDef(state.cards[c]).credits;
+    }
+  },
+
+  /** Flip the top card of the market deck; you may buy it this turn. Once per turn. */
+  scout(state, { player }) {
+    requireTurn(state, player);
+    const p = state.players[player];
+    if (p.scoutTurn === state.turnNumber) throw new GameError('You have already scouted the market this turn.');
+    if (!state.market.deck.length) throw new GameError('The market deck is empty.');
+    p.scout = state.market.deck.shift();
+    p.scoutTurn = state.turnNumber;
+    log(state, `${p.name} scouts the market: ${cardDef(state.cards[p.scout]).name}.`);
   },
 
   playCredit(state, { player, card, discard = null }) {
@@ -914,20 +975,38 @@ const HANDLERS = {
     checkAmbush(state, ship);
   },
 
-  buy(state, { player, def }) {
+  buy(state, { player, def, autoPay = false }) {
     requireTurn(state, player);
     const p = state.players[player];
-    // def is a Shipyard card id, or `market` is the uid of a Market Row card.
+    // def is a Shipyard card id, or the uid of a Market Row (or scouted) card.
     const fromMarket = !SHIPYARD.includes(def);
     const uid = fromMarket ? def : null;
-    if (fromMarket && !state.market.row.includes(uid)) throw new GameError('That card is not for sale.');
+    const scouted = fromMarket && p.scout === uid;
+    if (fromMarket && !scouted && !state.market.row.includes(uid)) throw new GameError('That card is not for sale.');
     const defId = fromMarket ? state.cards[uid].def : def;
     const price = buyPrice(state, player, defId);
-    if (p.credits < price) throw new GameError(`${CARDS[defId].name} costs ${price}; you have ${p.credits} credit${p.credits === 1 ? '' : 's'}.`);
+    if (p.credits < price && autoPay) {
+      const pay = autoPayCards(state, player, price - p.credits);
+      if (pay) {
+        for (const c of pay) {
+          p.hand.splice(p.hand.indexOf(c), 1);
+          p.played.push(c);
+          p.credits += cardDef(state.cards[c]).credits;
+        }
+      }
+    }
+    if (p.credits < price) {
+      const inHand = handCredits(state, player);
+      throw new GameError(`${CARDS[defId].name} costs ${price}; you have ${p.credits} credit${p.credits === 1 ? '' : 's'}${inHand ? ` and ${inHand} more in Credit cards` : ''}.`);
+    }
     p.credits -= price;
     p.spent += price;
     p.bestSpend = Math.max(p.bestSpend, p.spent);
-    if (fromMarket) {
+    if (scouted) {
+      state.cards[uid].owner = player;
+      p.discard.push(uid);
+      p.scout = null;
+    } else if (fromMarket) {
       const i = state.market.row.indexOf(uid);
       state.cards[uid].owner = player;
       p.discard.push(uid);
@@ -1006,7 +1085,7 @@ const HANDLERS = {
     p.discard.push(card);
     const events = [`${p.name} springs an ambush!`];
     fire(state, shooter, 0, mover, {}, events);
-    state.lastCombat = { attacker: shooter.id, target: mover.id, reaction: 'Ambush', events };
+    state.lastCombat = { attacker: shooter.id, target: mover.id, reaction: 'Ambush', reactionDef: 'ambush', ambush: true, events };
     for (const e of events) log(state, e);
   },
 
@@ -1032,6 +1111,10 @@ const HANDLERS = {
     if (new Set(keep).size !== keep.length || keep.some((u) => !p.hand.includes(u))) throw new GameError('You can only keep cards from your hand.');
     p.discard.push(...p.played, ...p.hand.filter((u) => !keep.includes(u)));
     p.played = [];
+    if (p.scout) { // an unbought scouted card goes to the bottom of the market deck
+      state.market.deck.push(p.scout);
+      p.scout = null;
+    }
     p.hand = [];
     p.reserve = [...keep]; // hidden from opponents; only the count is public
     if (p.credits > 0) log(state, `${p.name} lost ${p.credits} unspent credit${p.credits === 1 ? '' : 's'}.`);
@@ -1078,6 +1161,34 @@ const HANDLERS = {
   },
 };
 
+/** Credit cards that can be played without a choice (not Smuggler's Cache). */
+function isSimpleCredit(state, uid) {
+  const d = cardDef(state.cards[uid]);
+  return d.type === CARD_TYPE.CREDIT && !d.discard;
+}
+
+/** Credits still in hand as simple Credit cards. */
+export function handCredits(state, playerId) {
+  return state.players[playerId].hand.filter((u) => isSimpleCredit(state, u)).reduce((s, u) => s + cardDef(state.cards[u]).credits, 0);
+}
+
+/**
+ * The Credit cards to play to cover `need` credits: the set that wastes the
+ * fewest credits, then uses the fewest cards. Null if the hand can't cover it.
+ */
+export function autoPayCards(state, playerId, need) {
+  if (need <= 0) return [];
+  const cards = state.players[playerId].hand.filter((u) => isSimpleCredit(state, u));
+  let best = null;
+  for (let mask = 1; mask < 1 << cards.length; mask++) {
+    const set = cards.filter((_, i) => mask & (1 << i));
+    const sum = set.reduce((s, u) => s + cardDef(state.cards[u]).credits, 0);
+    if (sum < need) continue;
+    if (!best || sum < best.sum || (sum === best.sum && set.length < best.set.length)) best = { sum, set };
+  }
+  return best?.set ?? null;
+}
+
 /** Quick integrity check used by tests: every card is in exactly one place. */
 export function cardLocations(state) {
   const where = new Map();
@@ -1090,6 +1201,7 @@ export function cardLocations(state) {
   }
   for (const uid of state.market?.deck ?? []) put(uid, 'market deck');
   for (const uid of state.market?.row ?? []) put(uid, 'market row');
+  for (const p of state.players) if (p.scout) put(p.scout, `${p.id}.scout`);
   for (const uid of state.scrapped ?? []) put(uid, 'scrapped');
   for (const s of state.ships) {
     if (s.card) put(s.card, `ship ${s.id}`);

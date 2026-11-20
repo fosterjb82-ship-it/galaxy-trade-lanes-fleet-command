@@ -9,7 +9,7 @@ import { SHIPS } from '../src/game/ships.js';
 import { hexDistance } from '../src/map/hex.js';
 
 const act = (g, a) => applyAction(g, a);
-const newGame = (n = 3, seed = 'S5-1', extra = {}) => createGame({ missions: 'auto', seed, players: ['Ada', 'Bo', 'Cy', 'Di'].slice(0, n), ...extra });
+const newGame = (n = 3, seed = 'S5-1', extra = {}) => createGame({ missions: 'auto', startingFreighter: false, seed, players: ['Ada', 'Bo', 'Cy', 'Di'].slice(0, n), ...extra });
 
 function spawn(g, owner, type, tile, hull) {
   if (owner === 'pirate') {
@@ -55,6 +55,67 @@ test('market row: 6 face-up cards, bought card goes to discard and is replaced',
   assert.equal(g.market.deck.length, total - MARKET_ROW_SIZE - 1);
   assert.ok(price);
   cardLocations(g);
+});
+
+test('scout the market: once per turn, buy it this turn or it goes to the bottom', () => {
+  let g = newGame();
+  const top = g.market.deck[0];
+  const size = g.market.deck.length;
+  g = act(g, { type: 'scout', player: 0 });
+  assert.equal(g.players[0].scout, top);
+  assert.equal(g.market.deck.length, size - 1);
+  assert.throws(() => act(g, { type: 'scout', player: 0 }), /already scouted/);
+  assert.throws(() => act(g, { type: 'scout', player: 1 }), /turn/);
+  cardLocations(g);
+  // Not bought: back to the bottom at the end of the turn.
+  g = act(g, { type: 'endTurn', player: 0 });
+  assert.equal(g.players[0].scout, null);
+  assert.equal(g.market.deck.at(-1), top);
+  assert.equal(g.market.deck.length, size);
+  cardLocations(g);
+  // Bought: into the discard pile, the row is untouched.
+  const row = [...g.market.row];
+  const pid = g.active;
+  g = act(g, { type: 'scout', player: pid });
+  const uid = g.players[pid].scout;
+  g.players[pid].credits = 20;
+  g = act(g, { type: 'buy', player: pid, def: uid });
+  assert.ok(g.players[pid].discard.includes(uid));
+  assert.equal(g.cards[uid].owner, pid);
+  assert.equal(g.players[pid].scout, null);
+  assert.deepEqual(g.market.row, row);
+  cardLocations(g);
+});
+
+test('buying auto-plays Credit cards, wasting as little as possible', () => {
+  let g = newGame();
+  const p = () => g.players[0];
+  p().discard.push(...p().hand);
+  p().hand = [];
+  const c1 = giveCard(g, 0, 'credits');
+  const c2 = giveCard(g, 0, 'credits');
+  const t2 = giveCard(g, 0, 'trade-contract');
+  const sm = giveCard(g, 0, 'smugglers-cache');
+  // A 2-credit Credits card from the Shipyard: Trade Contract alone (2) beats two Credits.
+  g = act(g, { type: 'buy', player: 0, def: 'credits', autoPay: true });
+  assert.ok(p().played.includes(t2));
+  assert.ok(p().hand.includes(c1) && p().hand.includes(c2) && p().hand.includes(sm));
+  assert.equal(p().credits, 0);
+  // A fighter (2): the two Credits. Smuggler's Cache is never auto-played.
+  g = act(g, { type: 'buy', player: 0, def: 'ship-fighter', autoPay: true });
+  assert.deepEqual(p().hand, [sm]);
+  assert.throws(() => act(g, { type: 'buy', player: 0, def: 'ship-fighter', autoPay: true }), /costs 2; you have 0/);
+  assert.throws(() => act(g, { type: 'playAllCredits', player: 0 }), /No Credit cards/);
+  cardLocations(g);
+});
+
+test('play all credits plays every simple Credit card', () => {
+  let g = newGame();
+  const before = g.players[0].hand.filter((u) => g.cards[u].def === 'credits').length;
+  assert.ok(before > 0);
+  g = act(g, { type: 'playAllCredits', player: 0 });
+  assert.equal(g.players[0].credits, before);
+  assert.equal(g.players[0].hand.filter((u) => g.cards[u].def === 'credits').length, 0);
 });
 
 test('upgrades: slots, no duplicates, restrictions, stat effects', () => {
@@ -224,7 +285,7 @@ test('war chest, deep strike and backstabber missions', () => {
 
 test('pirate phase: pirates step toward the nearest freighter and attack it', () => {
   let g = newGame(2, 'S5-PIR');
-  g.ships = g.ships.filter((s) => s.owner !== 'pirate');
+  g.pirateWave = { arrival: 3, tiles: [], arrived: false }; // only our test pirate
   const [a] = empty(g);
   const b = g.map.nodes.find((n) => n.type === 'empty' && hexDistance(n, a) === 1);
   const fr = spawn(g, 0, 'freighter', b.id);
