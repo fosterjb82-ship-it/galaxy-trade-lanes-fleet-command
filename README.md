@@ -188,7 +188,21 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
 All artwork is drawn procedurally at the exact device-pixel size it is shown at (`src/render/art/`). It stays sharp at every zoom level and on high-DPI screens:
 
 - **Planets** are shaded spheres mapped from seamless noise textures: continents, oceans with a sun glint, polar ice, drifting clouds, atmosphere glow and rings. The six looks are a terran world for each home, jungle, rust (cratered), ice, violet, and a banded gas giant for the core. They turn slowly.
-- **Ships** are vector illustrations: metallic hulls, panel lines, glass cockpits, turrets, missile pods and flight decks. Each has player-colour trim and flickering engine flames. Pirates have gunmetal hulls, red trim and spikes.
+- **Ships** are vector illustrations, reworked to look more realistic and to differ clearly by class:
+  - **Hulls:** steel lit from above, with riveted panel plating, a highlight along the top edge, a shadowed rear and underside, and a coat of the player's colour.
+  - **Engines:** nozzle bells with exhaust plumes.
+  - **Details:** lit window rows, twin-barrel turrets, sensor masts with beacons, and painted hull numbers.
+  - **Sizes:** each class has its own size, from the small fighter to the full-size destroyer and carrier.
+  - **Silhouettes:**
+    - fighter: swept-wing dart with wingtip guns;
+    - interceptor: needle hull, forward-swept wings, twin engine pods and an ion emitter;
+    - missile corvette: launch blocks with armed hatches;
+    - freighter: engine block, open truss and stacked cargo containers;
+    - blockade runner: dark, smooth smuggler hull with oversized engines;
+    - frigate: angular, with a superstructure and ventral fin;
+    - destroyer: armoured, with a stepped bridge and three turrets;
+    - carrier: flight deck, island tower and a lit hangar.
+  - **Pirates** are patched together from rust-stained, mismatched plates with spikes and a ram.
 - **Tiles** are smooth hexes with starfields and bevelled rims. Nebulas are soft, shifting clouds. Asteroid fields hold shaded rocks with craters. Void rifts have glowing cracks.
 - **Features:** ring stations with docking arms and a gold hub, turning jump gates, solar-panel trade beacons and swirling hidden anomalies.
 - **Card icons** are drawn the same way.
