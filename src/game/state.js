@@ -16,7 +16,7 @@ import {
 import { neighbors, key as hexKey } from '../map/hex.js';
 import {
   routeOptions, pruneRoutes, isRouteEnd, blockaded, routeIncome, routesOf, activeAgreements, agreementBetween, offerCheck,
-  isTrader, BREAK_BONUS,
+  isTrader, BREAK_BONUS, activeRoutes,
 } from './trade.js';
 import { MISSIONS, missionDone, missionPool } from './missions.js';
 import { piratePhase } from './pirates.js';
@@ -29,6 +29,8 @@ export const KEY_PLANET_VP = 2;
 export const HOLDABLE = new Set(['home', 'key', 'station', 'trade', 'intersection']);
 /** Damage an enemy ship takes when it ends a move in someone's home sector. */
 export const HOME_DEFENCE = 2;
+/** VP per active (unblockaded) trade route at final scoring. */
+export const ROUTE_END_VP = 1;
 /** Pirates sit still for the opening rounds; the pirate phase starts this round. */
 export const PIRATE_START_ROUND = 3; // saves from before pirates arrived later
 /** Pirates warp in at the start of this round (rolled per game), with a round of warning. */
@@ -105,7 +107,7 @@ export function createGame({ seed, players, mapSeed = seed, length = 'standard',
       kills: 0,
       losses: 0,
       killLog: [], // { type, owner } of each ship destroyed (missions)
-      vpFrom: { planets: 0, agreements: 0, kills: 0, missions: 0 },
+      vpFrom: { planets: 0, agreements: 0, kills: 0, missions: 0, routes: 0 },
       missionOffer: [], // 3 dealt at the start; keep 2
       missions: [], // { id, scored }
       longestRoute: 0,
@@ -431,7 +433,7 @@ function startTurn(state) {
 function awardVP(state, pid, n, source) {
   const p = state.players[pid];
   p.vp += n;
-  p.vpFrom[source] += n;
+  p.vpFrom[source] = (p.vpFrom[source] ?? 0) + n;
 }
 
 /** Remove a ship: its card and upgrades go back to the owner's discard pile. */
@@ -476,7 +478,7 @@ function endRound(state) {
     if (sc.vp) log(state, `${state.players[sc.player].name} scores ${sc.vp} VP (${sc.keys.length} key planet${sc.keys.length === 1 ? '' : 's'}, ${sc.agreements} agreement${sc.agreements === 1 ? '' : 's'}).`);
   }
   const pirates = state.round >= pirateRound(state)
-    ? piratePhase(state, destroyShip, (sh) => shipLabel(state, sh), (sh) => homeDefence(state, sh, []))
+    ? piratePhase(state, destroyShip, (sh) => shipLabel(state, sh), (sh) => homeDefence(state, sh, []), (v, pir, ev) => pirateReaction(state, v, pir, ev))
     : [];
   for (const e of pirates) log(state, e);
   const arrivals = pirateArrivals(state);
@@ -497,6 +499,60 @@ function endRound(state) {
   state.firstPlayer = (state.firstPlayer + 1) % state.players.length;
   state.turnInRound = 0;
   log(state, `Round ${state.round} begins. ${state.players[state.firstPlayer].name} goes first.`);
+}
+
+/**
+ * A pirate hit is about to destroy a player's ship: play the best reaction
+ * from the owner's reserve for them (pirates don't wait for prompts).
+ * Retreat to a safe neighbour first (staying on the ship's trade route if it
+ * can), then Emergency Shields, then Evasive Maneuvers, whichever saves it.
+ */
+function pirateReaction(state, victim, pirate, events) {
+  const p = state.players[victim.owner];
+  if (!p?.reserve.length) return null;
+  const ps = shipStats(state, pirate);
+  const weapon = ps.weapons[0];
+  const vs = shipStats(state, victim);
+  const survives = (opts) => damageFor(weapon, ps, vs, opts).damage < victim.hull;
+  const held = (kind) => p.reserve.find((u) => cardDef(state.cards[u]).reaction === kind);
+  const play = (uid) => {
+    p.reserve.splice(p.reserve.indexOf(uid), 1);
+    p.discard.push(uid);
+    events.push(`${p.name} reacts with ${cardDef(state.cards[uid]).name}!`);
+  };
+
+  const retreat = held('retreat');
+  if (retreat) {
+    const route = state.routes.find((r) => r.ship === victim.id);
+    const nodes = state.map.nodes;
+    const safe = retreatTiles(state, victim).filter((t) => {
+      const n = nodes[t];
+      if (state.ships.some((s) => s.tile === t && s.owner !== victim.owner)) return false;
+      if (n.type === 'nebula' && victim.hull <= 1) return false;
+      if (n.type === 'home' && n.homeOf !== victim.owner && victim.hull <= HOME_DEFENCE) return false;
+      return true;
+    });
+    const score = (t) => (route?.path.includes(t) ? 4 : 0) + (controllerOf(state, t) === victim.owner ? 2 : 0) + (nodes[t].type === 'nebula' ? -1 : 0)
+      + (nodes[t].type === 'home' && nodes[t].homeOf !== victim.owner ? -3 : 0);
+    const to = safe.sort((a, b) => score(b) - score(a))[0];
+    if (to !== undefined) {
+      play(retreat);
+      events.push(`${shipLabel(state, victim)} retreats to ${tileName(state, to)}. The pirates miss.`);
+      enterTile(state, victim, to, events);
+      return { miss: true };
+    }
+  }
+  const shields = held('shields');
+  if (shields && survives({ extraShields: EMERGENCY_SHIELDS })) {
+    play(shields);
+    return { opts: { extraShields: EMERGENCY_SHIELDS } };
+  }
+  const evasive = held('evasive');
+  if (evasive && vs.evasive && survives({ evasive: true })) {
+    play(evasive);
+    return { opts: { evasive: true } };
+  }
+  return null;
 }
 
 /** Pirates the round is about to bring: warp them in at the end of the round before they arrive. */
@@ -526,6 +582,14 @@ function finalScoring(state) {
   state.pending = null;
   const control = controlMap(state);
   const keysOf = (pid) => [...control].filter(([t, o]) => o === pid && state.map.nodes[t].type === 'key').length;
+  // 1 VP for each trade route still running (not blockaded) when the war ends.
+  for (const p of state.players) {
+    const running = activeRoutes(state, p.id).length;
+    if (running) {
+      awardVP(state, p.id, running * ROUTE_END_VP, 'routes');
+      log(state, `${p.name} scores ${running * ROUTE_END_VP} VP for ${running} active trade route${running === 1 ? '' : 's'}.`);
+    }
+  }
   for (const p of state.players) {
     for (const m of p.missions) {
       const def = MISSIONS[m.id];

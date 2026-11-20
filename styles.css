@@ -1000,3 +1000,87 @@ body.still .tp-kill, body.still .tp-hull .seg.lose { animation: none; }
 .qty { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
 .qty-btn { width: 32px; height: 32px; padding: 0; font-size: 18px; font-weight: 700; display: grid; place-items: center; }
 .qty-n { min-width: 22px; text-align: center; font-size: 18px; font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- ship pickers */
+
+.ship-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.mode-bar .ship-choice, .ship-choice {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  width: 148px;
+  padding: 6px 8px 8px;
+  border-radius: 12px !important;
+  text-align: left;
+  border: 1.5px solid color-mix(in srgb, var(--owner) 70%, #24304f);
+  background: linear-gradient(180deg, #16203f, #0c1229);
+  color: var(--text);
+  font-weight: 500;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.ship-choice:hover { transform: translateY(-2px); box-shadow: 0 0 0 2px var(--owner), 0 8px 18px rgba(0, 0, 0, 0.5); }
+.ship-choice.danger:hover { box-shadow: 0 0 0 2px #ff5d5d, 0 8px 18px rgba(0, 0, 0, 0.5); }
+.sc-art { display: grid; place-items: center; height: 62px; border-radius: 8px; background: radial-gradient(circle at 50% 50%, #1d2a57, #0a1028 75%); }
+.sc-name { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-size: 12px; }
+.sc-name span { color: var(--muted); font-size: 11px; }
+.sc-hull { display: flex; align-items: center; gap: 2px; }
+.sc-hull .seg { flex: 1; max-width: 16px; height: 6px; border-radius: 2px; background: #3ddc84; }
+.sc-hull .seg.empty { background: rgba(255, 255, 255, 0.12); }
+.sc-hull .seg.lose { background: #ff5d5d; animation: tp-lose 0.5s steps(2) infinite; }
+.sc-num { margin-left: auto; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sc-ups { display: flex; flex-wrap: wrap; gap: 3px; }
+.sc-up { font-size: 9.5px; padding: 1px 5px; border-radius: 4px; background: #232c4a; color: #c8d0ec; }
+.sc-info { font-size: 11px; color: #c8d0ec; text-transform: none; }
+.sc-status { font-size: 10px; color: var(--gold); }
+.sc-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #2a1010;
+  border: 1px solid #ff7a5c;
+  color: #ffd6cc;
+}
+.ship-choice.lethal .sc-badge { background: #ff3b3b; border-color: #ff3b3b; color: #fff; }
+body.still .sc-hull .seg.lose { animation: none; }
+
+/* ---------------------------------------------------------------- route setup in the ship pane */
+
+.route-box { display: flex; flex-direction: column; gap: 8px; }
+.route-current { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line); }
+.route-current b:first-child { flex: 1; }
+.gold { color: var(--gold); }
+.route-opts { display: flex; flex-direction: column; gap: 4px; }
+.route-opt { display: grid; grid-template-columns: 1fr auto auto; align-items: baseline; gap: 8px; text-align: left; padding: 7px 10px; }
+.route-opt:hover:not(:disabled) { border-color: #6dffa8; }
+.route-opt.on { opacity: 0.6; }
+.ro-name { font-weight: 600; }
+
+/* ---------------------------------------------------------------- deck viewer */
+
+button.pile { font: inherit; cursor: pointer; background: transparent; }
+button.pile:hover { border-color: var(--accent); color: var(--text); }
+.deck-summary { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.deck-chip { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); }
+.deck-chip.type-credit { border-color: #a88324; }
+.deck-chip.type-ship { border-color: #3b6fb0; }
+.deck-chip.type-command { border-color: #3a8f9a; }
+.deck-chip.type-reaction { border-color: #8a5cc9; }
+.deck-chip.type-upgrade { border-color: #6b7186; }
+.deck-chip.type-utility { border-color: #2e8b57; }
+.deck-sections { max-height: min(62vh, 640px); overflow-y: auto; padding-right: 6px; display: flex; flex-direction: column; gap: 14px; }
+.deck-section h3 { margin: 0 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.deck-section.focus h3 { color: var(--accent); }
+.deck-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+.tcard.mini { position: relative; cursor: default; }
+.tcard.mini:hover { transform: none; }
+.mini-count { position: absolute; top: 4px; right: 4px; z-index: 1; background: #ffd166; color: #2a1d00; font-weight: 800; font-size: 12px; padding: 1px 6px; border-radius: 999px; }
+.deck-ships { display: flex; flex-direction: column; gap: 10px; }
+.deck-ship .linkish { margin-bottom: 4px; }

@@ -175,6 +175,7 @@ test("smuggler's cache discards a card; refit dock scraps one for good", () => {
 function tradeSetup(seed = 'S5-TRADE') {
   const g = newGame(3, seed);
   g.ships = g.ships.filter((s) => s.owner !== 'pirate'); // keep wandering pirates off the routes
+  g.pirateWave.tiles = [];
   const tn = g.map.nodes.filter((n) => n.type === 'trade');
   return { g, tn };
 }
@@ -460,4 +461,50 @@ test('shipyard cards can be bought several at a time; market cards cannot', () =
   assert.throws(() => act(g, { type: 'buy', player: 0, def: g.market.row[0], count: 2 }), /only Shipyard cards/);
   assert.throws(() => act(g, { type: 'buy', player: 0, def: 'credits', count: 0 }), /between 1 and 20/);
   cardLocations(g);
+});
+
+test('a lethal pirate hit plays Retreat (or Emergency Shields) from reserve automatically', () => {
+  for (const [def, expectMoved] of [['retreat', true], ['emergency-shields', false]]) {
+    let g = newGame(2, 'S5-PREACT');
+    g.pirateWave = { arrival: 1, tiles: [], arrived: true };
+    const [a] = empty(g);
+    const fr = spawn(g, 0, 'freighter', a.id, 2);
+    const pir = spawn(g, 'pirate', null, a.id);
+    const card = giveCard(g, 0, def);
+    g = act(g, { type: 'endTurn', player: 0, keep: [card] }); // held in reserve
+    g = endAll(g);
+    const f = ship(g, fr);
+    assert.ok(f, `${def}: freighter survives`);
+    assert.equal(f.tile !== a.id, expectMoved, `${def}: moved?`);
+    assert.equal(f.hull, 2, `${def}: no damage taken`);
+    assert.ok(g.players[0].discard.includes(card), `${def}: card used`);
+    assert.ok(g.rounds[0].pirates.some((e) => /reacts with/.test(e)));
+    assert.ok(ship(g, pir));
+    cardLocations(g);
+  }
+  // Not lethal: the card is kept.
+  let g = newGame(2, 'S5-PREACT');
+  g.pirateWave = { arrival: 1, tiles: [], arrived: true };
+  const [a] = empty(g);
+  const fr = spawn(g, 0, 'freighter', a.id, 3);
+  spawn(g, 'pirate', null, a.id);
+  const card = giveCard(g, 0, 'retreat');
+  g = act(g, { type: 'endTurn', player: 0, keep: [card] });
+  g = endAll(g);
+  assert.equal(ship(g, fr).hull, 1);
+  assert.ok(!g.players[0].discard.includes(card));
+});
+
+test('final scoring: 1 VP per trade route still running (blockaded routes score nothing)', () => {
+  let { g, tn } = tradeSetup('S5-ROUTEVP');
+  g.settings.length = 'quick';
+  const a = spawn(g, 0, 'freighter', tn[0].id);
+  const b = spawn(g, 0, 'freighter', tn[1].id);
+  g = act(g, { type: 'establishRoute', player: 0, ship: a, to: routeOptions(g, ship(g, a))[0].to });
+  g = act(g, { type: 'establishRoute', player: 0, ship: b, to: routeOptions(g, ship(g, b))[0].to });
+  // Blockade the second route with one of Bo's ships.
+  spawn(g, 1, 'frigate', g.routes[1].path.at(-1));
+  while (g.phase === 'action') g = endAll(g);
+  assert.equal(g.players[0].vpFrom.routes, 1);
+  assert.ok(g.log.some((l) => /scores 1 VP for 1 active trade route/.test(l.text)));
 });

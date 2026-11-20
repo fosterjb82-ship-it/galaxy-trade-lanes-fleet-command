@@ -263,6 +263,19 @@ Rest the pointer on something for **1 second** to see a magnified picture with i
 - **Ships you don't control block movement:** this rule was already in the engine. While choosing a move, any tile in range holding ships you don't control (another player's or pirates) gets an amber dashed outline and a ✋ badge. You can stop there, but you can't fly through it, so tiles beyond it are only reachable by another way round.
 - **Buy several copies:** Shipyard cards (Credits and the four basic ships) have a − / + copies selector in the buy dialog, up to what you can afford with your credits and the Credit cards in hand. Market row and scouted cards are single cards, so they stay one at a time.
 
+### Pickers, routes from the ship, deck viewer
+
+- **Graphic ship pickers:** when several ships could move, fire or take an upgrade, or there are several targets, the bar above the map shows ship tiles instead of names.
+  - Each tile has the ship's art, owner, hull bar, fitted upgrades and a line of detail: speed for moves, weapons for attackers, slots for upgrades.
+  - For targets, the tile shows the damage maths, the hull it would lose (flashing) and a −N / DESTROY / ION badge.
+  - Pointing at a tile highlights that ship on the board.
+- **Trade routes from the ship:** click a freighter or blockade runner to see its route in its details pane.
+  - On your turn the pane lists every destination it can run to, with jumps and income. Pointing at one draws the route on the map; clicking sets it up or replaces the old one.
+  - If it can't start a route where it is, the pane says why. After you move a trader onto a tile where it can start a route, its pane opens on its own.
+- **Deck viewer:** click the Deck or Discard pile next to your hand to see every card you own: draw pile, hand, reserve, played this turn, discard pile, and the ship and upgrade cards on the board, grouped with counts.
+- **Pirates and reactions:** see "Rules decided" below. If a pirate hit would destroy your ship, a Retreat, Emergency Shields or Evasive Maneuvers card in your reserve is played for you.
+- **Active routes score at the end:** at final scoring, each trade route still running (not blockaded) is worth 1 VP. The final table's Trade column adds it to agreement VP.
+
 ## Rules decided where the design was silent or didn't fit the hex board
 
 - Holdable tiles (homes, planets, stations, trade nodes, intersections) stay with their holder until an enemy has the upper hand there; open space needs ships present. Pirates never hold tiles.
@@ -272,7 +285,7 @@ Rest the pointer on something for **1 second** to see a magnified picture with i
 - Each ship fires once per turn. Pirate kills score 1 VP. Cannons ignore 2 shield points.
 - Reaction prompts only appear when the defender holds reserve cards (the count is public).
 - Trade routes are paths from a trade node to another trade node or a planet, and the trader ship must stay on them. Agreements need both players to run a route.
-- Defenders get no reaction prompt against pirate attacks, because the pirate phase runs automatically.
+- Defenders get no reaction prompt against pirate attacks, because the pirate phase runs automatically. Instead, if a pirate hit would destroy a ship, the first of Retreat, Emergency Shields or Evasive Maneuvers in its owner's reserve that saves it is played automatically. Retreat goes to a safe neighbouring tile, staying on the ship's trade route if it can.
 
 ## Layout
 
