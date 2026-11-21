@@ -71,6 +71,8 @@ export class GameError extends Error {}
  */
 export function createGame({ seed, players, mapSeed = seed, length = 'standard', missions = 'draft', startingFreighter = true }) {
   if (players.length < 2 || players.length > 6) throw new GameError('Fleet Command needs 2–6 players');
+  // Players are names, or { name, cpu } for computer-controlled opponents.
+  players = players.map((x) => (typeof x === 'string' ? { name: x } : x));
   const map = generateMap(mapSeed, players.length);
   const state = {
     version: 2,
@@ -92,9 +94,10 @@ export function createGame({ seed, players, mapSeed = seed, length = 'standard',
     agreements: [], // { id, a, b }
     notices: [], // public announcements for the UI (missions scored, …)
     final: null,
-    players: players.map((name, i) => ({
+    players: players.map(({ name, cpu = false }, i) => ({
       id: i,
       name: name || `Player ${i + 1}`,
+      cpu,
       home: map.nodes.find((n) => n.homeOf === i).id,
       deck: [],
       hand: [],
@@ -478,7 +481,7 @@ function endRound(state) {
     if (sc.vp) log(state, `${state.players[sc.player].name} scores ${sc.vp} VP (${sc.keys.length} key planet${sc.keys.length === 1 ? '' : 's'}, ${sc.agreements} agreement${sc.agreements === 1 ? '' : 's'}).`);
   }
   const pirates = state.round >= pirateRound(state)
-    ? piratePhase(state, destroyShip, (sh) => shipLabel(state, sh), (sh) => homeDefence(state, sh, []), (v, pir, ev) => pirateReaction(state, v, pir, ev))
+    ? piratePhase(state, destroyShip, (sh) => shipLabel(state, sh), (sh, ev) => homeDefence(state, sh, ev) && pirateAmbush(state, sh, ev), (v, pir, ev) => pirateReaction(state, v, pir, ev), (v, pir, ev) => pirateReturnFire(state, v, pir, ev))
     : [];
   for (const e of pirates) log(state, e);
   const arrivals = pirateArrivals(state);
@@ -514,12 +517,8 @@ function pirateReaction(state, victim, pirate, events) {
   const weapon = ps.weapons[0];
   const vs = shipStats(state, victim);
   const survives = (opts) => damageFor(weapon, ps, vs, opts).damage < victim.hull;
-  const held = (kind) => p.reserve.find((u) => cardDef(state.cards[u]).reaction === kind);
-  const play = (uid) => {
-    p.reserve.splice(p.reserve.indexOf(uid), 1);
-    p.discard.push(uid);
-    events.push(`${p.name} reacts with ${cardDef(state.cards[uid]).name}!`);
-  };
+  const held = (kind) => heldReaction(state, p, kind);
+  const play = (uid) => playPirateReaction(state, p, uid, events);
 
   const retreat = held('retreat');
   if (retreat) {
@@ -553,6 +552,45 @@ function pirateReaction(state, victim, pirate, events) {
     return { opts: { evasive: true } };
   }
   return null;
+}
+
+/** Play a reaction card from a player's reserve against pirates. */
+function playPirateReaction(state, p, uid, events) {
+  p.reserve.splice(p.reserve.indexOf(uid), 1);
+  p.discard.push(uid);
+  events.push(`${p.name} reacts with ${cardDef(state.cards[uid]).name}!`);
+}
+
+const heldReaction = (state, p, kind) => p.reserve.find((u) => cardDef(state.cards[u]).reaction === kind);
+
+/** A pirate moved onto a tile: an armed ship there with Ambush hits it first. Returns false if it died. */
+function pirateAmbush(state, pirate, events) {
+  for (const p of turnOrder(state).map((pid) => state.players[pid])) {
+    const card = heldReaction(state, p, 'ambush');
+    if (!card) continue;
+    const shooter = shipsAt(state, pirate.tile)
+      .filter((s) => s.owner === p.id && !s.disabled && shipStats(state, s).weapons.length)
+      .sort((a, b) => shipStats(state, b).weapons[0].damage - shipStats(state, a).weapons[0].damage)[0];
+    if (!shooter) continue;
+    playPirateReaction(state, p, card, events);
+    events.push(`${p.name} springs an ambush on the pirates!`);
+    const report = fire(state, shooter, 0, pirate, {}, events);
+    if (report.destroyed) return false;
+  }
+  return true;
+}
+
+/** After a pirate hit the ship survived: Return Fire hits back. */
+function pirateReturnFire(state, victim, pirate, events) {
+  const p = state.players[victim.owner];
+  const card = p && heldReaction(state, p, 'returnFire');
+  if (!card || victim.disabled || !shipById(state, pirate.id)) return;
+  const vs = shipStats(state, victim);
+  const wi = vs.weapons.findIndex((w) => inRange(state, victim, w, pirate));
+  if (wi < 0) return;
+  playPirateReaction(state, p, card, events);
+  events.push('Return fire!');
+  fire(state, victim, wi, pirate, {}, events);
 }
 
 /** Pirates the round is about to bring: warp them in at the end of the round before they arrive. */

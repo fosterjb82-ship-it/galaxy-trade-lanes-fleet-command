@@ -508,3 +508,37 @@ test('final scoring: 1 VP per trade route still running (blockaded routes score 
   assert.equal(g.players[0].vpFrom.routes, 1);
   assert.ok(g.log.some((l) => /scores 1 VP for 1 active trade route/.test(l.text)));
 });
+
+test('Ambush and Return Fire are played automatically against pirates', () => {
+  // Ambush: a pirate steps onto a tile with Ada's frigate (hunting a freighter beyond it).
+  let g = newGame(2, 'S5-PAMB');
+  g.pirateWave = { arrival: 1, tiles: [], arrived: true };
+  const a = empty(g).find((n) => g.map.nodes.filter((m) => m.type === 'empty' && hexDistance(m, n) === 1).length >= 2);
+  const [b, c] = g.map.nodes.filter((m) => m.type === 'empty' && hexDistance(m, a) === 1 && !g.ships.some((s) => s.tile === m.id));
+  const fr = spawn(g, 0, 'frigate', a.id);
+  spawn(g, 0, 'freighter', a.id);
+  const pir = spawn(g, 'pirate', null, b.id, 2);
+  void c;
+  const amb = giveCard(g, 0, 'ambush');
+  g = act(g, { type: 'endTurn', player: 0, keep: [amb] });
+  g = endAll(g);
+  assert.equal(ship(g, pir), undefined, 'ambush (laser 2) destroys the 2-hull pirate on arrival');
+  assert.ok(g.players[0].discard.includes(amb));
+  assert.equal(g.players[0].kills, 1);
+  assert.equal(ship(g, fr).hull, 4);
+  cardLocations(g);
+
+  // Return Fire: the pirate hits a frigate (4 hull, survives) and takes 2 back.
+  g = newGame(2, 'S5-PRF');
+  g.pirateWave = { arrival: 1, tiles: [], arrived: true };
+  const [t] = empty(g);
+  const fr2 = spawn(g, 0, 'frigate', t.id);
+  const pir2 = spawn(g, 'pirate', null, t.id);
+  const rf = giveCard(g, 0, 'return-fire');
+  g = act(g, { type: 'endTurn', player: 0, keep: [rf] });
+  g = endAll(g);
+  assert.equal(ship(g, fr2).hull, 2);
+  assert.equal(ship(g, pir2).hull, 2, 'return fire hits the pirate for 2');
+  assert.ok(g.players[0].discard.includes(rf));
+  assert.ok(g.rounds[0].pirates.includes('Return fire!'));
+});

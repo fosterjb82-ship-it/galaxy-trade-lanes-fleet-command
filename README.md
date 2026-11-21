@@ -1,6 +1,6 @@
 # Galaxy Trade Lanes: Fleet Command
 
-Browser prototype of the 2–6 player deck-building space strategy game described in [DESIGN.md](DESIGN.md). Hot-seat multiplayer: everyone plays on one screen.
+Browser prototype of the 2–6 player deck-building space strategy game described in [DESIGN.md](DESIGN.md). Single player: you against 1–5 CPU opponents.
 
 ## Run it
 
@@ -88,7 +88,7 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
 
 ### Stage 3: Turn flow
 
-- **Hot-seat handoff:** each turn starts on a "Pass the device to …" screen that hides the hand until that player confirms. The previous player's hand is never shown to the next player.
+- **Turns:** originally hot-seat with "Pass the device" screens. The game is now single player against CPU opponents (see "You against the CPU" below).
 - **Play cards in any order:**
   - **Credits** add to your credits for this turn.
   - **Ship** cards deploy (see Stage 2).
@@ -188,7 +188,21 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
 All artwork is drawn procedurally at the exact device-pixel size it is shown at (`src/render/art/`). It stays sharp at every zoom level and on high-DPI screens:
 
 - **Planets** are shaded spheres mapped from seamless noise textures: continents, oceans with a sun glint, polar ice, drifting clouds, atmosphere glow and rings. The six looks are a terran world for each home, jungle, rust (cratered), ice, violet, and a banded gas giant for the core. They turn slowly.
-- **Ships** are vector illustrations: metallic hulls, panel lines, glass cockpits, turrets, missile pods and flight decks. Each has player-colour trim and flickering engine flames. Pirates have gunmetal hulls, red trim and spikes.
+- **Ships** are vector illustrations, reworked to look more realistic and to differ clearly by class:
+  - **Hulls:** steel lit from above, with riveted panel plating, a highlight along the top edge, a shadowed rear and underside, and a coat of the player's colour.
+  - **Engines:** nozzle bells with exhaust plumes.
+  - **Details:** lit window rows, twin-barrel turrets, sensor masts with beacons, and painted hull numbers.
+  - **Sizes:** each class has its own size, from the small fighter to the full-size destroyer and carrier.
+  - **Silhouettes:**
+    - fighter: swept-wing dart with wingtip guns;
+    - interceptor: needle hull, forward-swept wings, twin engine pods and an ion emitter;
+    - missile corvette: launch blocks with armed hatches;
+    - freighter: engine block, open truss and stacked cargo containers;
+    - blockade runner: dark, smooth smuggler hull with oversized engines;
+    - frigate: angular, with a superstructure and ventral fin;
+    - destroyer: armoured, with a stepped bridge and three turrets;
+    - carrier: flight deck, island tower and a lit hangar.
+  - **Pirates** are patched together from rust-stained, mismatched plates with spikes and a ram.
 - **Tiles** are smooth hexes with starfields and bevelled rims. Nebulas are soft, shifting clouds. Asteroid fields hold shaded rocks with craters. Void rifts have glowing cracks.
 - **Features:** ring stations with docking arms and a gold hub, turning jump gates, solar-panel trade beacons and swirling hidden anomalies.
 - **Card icons** are drawn the same way.
@@ -276,6 +290,31 @@ Rest the pointer on something for **1 second** to see a magnified picture with i
 - **Pirates and reactions:** see "Rules decided" below. If a pirate hit would destroy your ship, a Retreat, Emergency Shields or Evasive Maneuvers card in your reserve is played for you.
 - **Active routes score at the end:** at final scoring, each trade route still running (not blockaded) is worth 1 VP. The final table's Trade column adds it to agreement VP.
 
+### You against the CPU
+
+The game is now single player: you against 1–5 CPU opponents. There is no hot-seat play.
+
+- **Setup:** enter your name and pick 1–5 opponents (Admiral Vex, Commander Orla, Captain Rusk, Warden Sela, Marshal Toren), the map seed and the game length. The CPUs choose their secret missions straight away.
+- **Your turn:** your hand is always visible. The turn chips in the top bar mark you with ★ and highlight whoever is playing.
+- **CPU turns:** these play automatically, one animated action at a time. A short message says what each CPU did, and your hand stays on screen, dimmed, for your next turn.
+  - You can still click tiles and ships to inspect them.
+  - **⚙ Options → CPU speed** sets the pace: Slow, Normal or Fast.
+- **Answering CPUs:** when a CPU attacks one of your ships and you hold reaction cards, the reaction dialog opens for you straight away. When a CPU moves onto your ships, you get the Ambush prompt. When a CPU offers a trade agreement, you accept or decline.
+- **CPUs answering you:** when you attack a CPU, offer it a deal or move onto its ships, it answers at once.
+- **Battle close-ups** play for fights involving your ships. Fights between CPUs (or against pirates) show on the board only.
+- **⚙ Options** also holds the Animations switch and the battle close-up setting.
+- **How the CPU plays** (`src/game/ai.js`): it decides one action at a time using rules of thumb, not a search.
+  - It deploys ships, fits upgrades and repairs, and fires at the best target in range, kills first.
+  - It sets up trade routes first: freighters without a route move before anything else. Warships head for key planets, stations, intersections and weaker enemies, and avoid enemy home defences.
+  - It scouts the market, buys what helps most (ships within its Command Points, Trade Contracts, fitting upgrades), offers trade agreements to players who aren't far ahead, and keeps reaction cards at the end of its turn.
+  - It plays reactions sensibly when attacked: Point Defense against missiles, Retreat, Shields or Evasive against lethal hits, Return Fire otherwise.
+  - CPU-only test games run to the end at every player count.
+- **Every reaction works against pirates** (played for you automatically):
+  - Ambush when a pirate moves onto your armed ship's tile;
+  - Retreat, Emergency Shields or Evasive Maneuvers when a hit would destroy your ship;
+  - Return Fire after a hit your ship survives.
+  - Point Defense never applies, because pirates fire lasers.
+
 ## Rules decided where the design was silent or didn't fit the hex board
 
 - Holdable tiles (homes, planets, stations, trade nodes, intersections) stay with their holder until an enemy has the upper hand there; open space needs ships present. Pirates never hold tiles.
@@ -285,7 +324,7 @@ Rest the pointer on something for **1 second** to see a magnified picture with i
 - Each ship fires once per turn. Pirate kills score 1 VP. Cannons ignore 2 shield points.
 - Reaction prompts only appear when the defender holds reserve cards (the count is public).
 - Trade routes are paths from a trade node to another trade node or a planet, and the trader ship must stay on them. Agreements need both players to run a route.
-- Defenders get no reaction prompt against pirate attacks, because the pirate phase runs automatically. Instead, if a pirate hit would destroy a ship, the first of Retreat, Emergency Shields or Evasive Maneuvers in its owner's reserve that saves it is played automatically. Retreat goes to a safe neighbouring tile, staying on the ship's trade route if it can.
+- Defenders get no reaction prompt against pirate attacks, because the pirate phase runs automatically. Instead, reactions are played automatically: Ambush when a pirate arrives, Retreat / Emergency Shields / Evasive Maneuvers (whichever saves the ship) against a lethal hit, and Return Fire after a hit the ship survives. Retreat goes to a safe neighbouring tile, staying on the ship's trade route if it can.
 
 ## Layout
 
@@ -306,6 +345,7 @@ src/game/combat.js      ship stats, upgrades, damage maths, range, attack option
 src/game/trade.js       trade routes, blockades, agreements
 src/game/missions.js    the 18 secret missions and their progress
 src/game/pirates.js     end-of-round pirate phase
+src/game/ai.js          CPU opponents: one action at a time, plus answers to attacks and offers
 src/render/units.js     ships, control outlines and deploy targets on the board
 src/render/fx.js        effects player: moves, shots, explosions, warp-ins, floating numbers
 src/audio/sound.js      synthesised music and sound effects, volume settings
