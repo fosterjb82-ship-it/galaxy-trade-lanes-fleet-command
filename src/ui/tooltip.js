@@ -39,6 +39,10 @@ const TYPE_RULES = {
 
 const CARD_RULES = {
   credits: ['Always for sale in the Shipyard for 2, so the economy never stalls.'],
+  'recon-sweep': ['Works like Move; you draw a card as soon as you play it. If your deck is empty, your discard pile is shuffled in.'],
+  'tactical-strike': ['Works like Attack; you draw a card as soon as you play it.'],
+  'supply-drop': ['Pays itself when you buy, like any Credit card, and still draws you a card.'],
+  logistics: ['Play it from your hand at any point in your turn. The two cards can be played this turn.'],
   'smugglers-cache': ['After the credits, you must discard another card from your hand (if you have one).'],
   move: [
     'Move one of your ships up to its speed. Each tile costs 1 movement; asteroid fields cost 2; void rifts can\'t be entered.',

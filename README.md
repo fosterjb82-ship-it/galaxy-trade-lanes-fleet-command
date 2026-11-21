@@ -155,7 +155,7 @@ The engine (`src/game/`) is a pure, JSON-serialisable state that only changes th
   - Diplomat and Backstabber are left out of 2-player games.
 - **Pirate phase (end of each round, once pirates have arrived):** each pirate fleet moves 1 tile toward the nearest freighter or blockade runner, then attacks a player ship on its tile, preferring traders.
 - **Uncertain ending:**
-  - After round 7 there is a 1 in 3 chance the game ends; after rounds 8 and 9, 1 in 2; round 10 always ends it.
+  - A standard game lasts at least 10 rounds: after round 10 there is a 1 in 3 chance the game ends, after round 11 a 1 in 2 chance, and round 12 always ends it.
   - The round summary shows the roll, with an "Imperial Ceasefire" alert when the war ends.
   - A *Quick test* game length (end after round 3 or 4) lets you see the ending fast.
 - **Final scoring:**
@@ -314,6 +314,21 @@ The game is now single player: you against 1–5 CPU opponents. There is no hot-
   - Retreat, Emergency Shields or Evasive Maneuvers when a hit would destroy your ship;
   - Return Fire after a hit your ship survives.
   - Point Defense never applies, because pirates fire lasers.
+
+### Card draw, bigger missions, longer games
+
+- **New market cards that draw** (3 copies each):
+
+  | Card | Cost | Type | Effect |
+  |---|---|---|---|
+  | Recon Sweep | 3 | Command | Move one ship up to its speed, then draw a card |
+  | Tactical Strike | 3 | Command | One ship fires its weapons, then draw a card |
+  | Supply Drop | 3 | Credit | +1 credit, then draw a card (also draws when it pays automatically) |
+  | Logistics | 3 | Utility | Draw 2 cards |
+
+  If your deck runs out, your discard pile is shuffled in. The CPUs buy and play them too.
+- **Missions are worth more:** 2-VP missions now give 5, 3-VP missions 7 and 4-VP missions 9.
+- **Longer games:** a standard game lasts at least 10 rounds. After round 10 there is a 1 in 3 chance it ends, after round 11 a 1 in 2 chance, and round 12 always ends it. Quick games are unchanged (3–4 rounds).
 
 ## Rules decided where the design was silent or didn't fit the hex board
 

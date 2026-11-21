@@ -179,6 +179,35 @@ const RED = '#e5484d';
 const GREEN = '#30c26b';
 const ship = (type, w, color = BLUE, frame = 0) => renderShip(w, type, color, frame);
 
+/** A fanned hand of face-down cards, with the top one glowing (drawing a card). */
+function fan(ctx, x, y, h, n = 3, accent = '#6fe3ff') {
+  const w = h * 0.68;
+  for (let i = 0; i < n; i++) {
+    const a = (i - (n - 1) / 2) * 0.22;
+    ctx.save();
+    ctx.translate(x + (i - (n - 1) / 2) * w * 0.32, y + Math.abs(i - (n - 1) / 2) * h * 0.05);
+    ctx.rotate(a);
+    const top = i === n - 1;
+    const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+    g.addColorStop(0, top ? '#2b3f7a' : '#1c2650');
+    g.addColorStop(1, top ? '#141d42' : '#0c122b');
+    ctx.fillStyle = g;
+    ctx.strokeStyle = top ? accent : '#4a5a8f';
+    ctx.lineWidth = h * 0.035;
+    ctx.beginPath();
+    ctx.roundRect(-w / 2, -h / 2, w, h, h * 0.08);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = top ? accent : '#33406b';
+    ctx.lineWidth = h * 0.02;
+    ctx.beginPath();
+    ctx.roundRect(-w * 0.34, -h * 0.36, w * 0.68, h * 0.72, h * 0.05);
+    ctx.stroke();
+    ctx.restore();
+  }
+  glow(ctx, x + (n - 1) / 2 * w * 0.32, y - h * 0.1, h * 0.55, 'rgba(160, 240, 255, 0.45)', 'rgba(60, 160, 255, 0)');
+}
+
 // ---------------------------------------------------------------- card scenes
 
 const CARD_SCENES = {
@@ -204,6 +233,23 @@ const CARD_SCENES = {
     for (let i = 0; i < 5; i++) coin(ctx, x - w * 0.36 + i * w * 0.18, y - h * 0.62 - (i % 2) * h * 0.18, H * 0.11);
     glow(ctx, x, y - h * 0.5, W * 0.3, 'rgba(255,220,120,0.5)', 'rgba(255,180,60,0.15)');
   },
+  'recon-sweep': (ctx, W, H) => {
+    put(ctx, ship('interceptor', W * 0.4), W * 0.38, H * 0.55);
+    for (let i = 0; i < 3; i++) link(ctx, W * 0.02, H * (0.42 + i * 0.12), W * 0.18, H * (0.42 + i * 0.12), 'rgba(140,220,255,0.6)', H * 0.014);
+    fan(ctx, W * 0.78, H * 0.48, H * 0.46);
+  },
+  'tactical-strike': (ctx, W, H) => {
+    put(ctx, ship('frigate', W * 0.32), W * 0.2, H * 0.62);
+    put(ctx, ship('pirate', W * 0.24, '#d23c3c'), W * 0.56, H * 0.3, { flip: true });
+    beam(ctx, W * 0.32, H * 0.58, W * 0.5, H * 0.34, '#ff6b6b', H * 0.03);
+    glow(ctx, W * 0.52, H * 0.32, W * 0.08, 'rgba(255,255,255,1)', 'rgba(255,140,60,0.6)');
+    fan(ctx, W * 0.82, H * 0.6, H * 0.42);
+  },
+  'supply-drop': (ctx, W, H) => {
+    coin(ctx, W * 0.3, H * 0.52, H * 0.24);
+    fan(ctx, W * 0.68, H * 0.5, H * 0.5);
+  },
+  logistics: (ctx, W, H) => fan(ctx, W * 0.5, H * 0.52, H * 0.62, 4),
   move: (ctx, W, H) => {
     put(ctx, ship('fighter', W * 0.42), W * 0.56, H * 0.5);
     for (let i = 0; i < 4; i++) link(ctx, W * 0.08, H * (0.32 + i * 0.12), W * 0.3, H * (0.32 + i * 0.12), 'rgba(140,220,255,0.6)', H * 0.015);
