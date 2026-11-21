@@ -36,10 +36,23 @@ export const CARDS = {
     text: 'Move one ship up to its speed +1.',
   },
 
+  // Commands that also draw a card (market)
+  'recon-sweep': {
+    name: 'Recon Sweep', type: CARD_TYPE.COMMAND, cost: 3, icon: 'card:move', command: 'move', speedBonus: 0, draw: 1,
+    text: 'Move one ship up to its speed, then draw a card.',
+  },
+  'tactical-strike': {
+    name: 'Tactical Strike', type: CARD_TYPE.COMMAND, cost: 3, icon: 'card:attack', command: 'attack', bonus: 0, draw: 1,
+    text: 'One ship fires its weapons, then draw a card.',
+  },
   // Better credit cards (market)
   'trade-contract': {
     name: 'Trade Contract', type: CARD_TYPE.CREDIT, cost: 3, credits: 2, icon: 'card:credit',
     text: '+2 credits.',
+  },
+  'supply-drop': {
+    name: 'Supply Drop', type: CARD_TYPE.CREDIT, cost: 3, credits: 1, draw: 1, icon: 'card:credit',
+    text: '+1 credit, then draw a card.',
   },
   'smugglers-cache': {
     name: "Smuggler's Cache", type: CARD_TYPE.CREDIT, cost: 4, credits: 3, discard: true, icon: 'card:credit',
@@ -77,6 +90,10 @@ export const CARDS = {
   },
 
   // Utility
+  logistics: {
+    name: 'Logistics', type: CARD_TYPE.UTILITY, cost: 3, draw: 2, icon: 'card:upgrade',
+    text: 'Draw 2 cards.',
+  },
   repair: {
     name: 'Repair', type: CARD_TYPE.UTILITY, cost: 2, icon: 'card:repair', repair: 2,
     text: 'Repair 2 hull on one of your ships, anywhere.',
@@ -134,6 +151,8 @@ export const MARKET_DECK = [
   ['targeting-computer', 2], ['repair-drones', 2],
   // commands and credits
   ['focused-strike', 3], ['full-burn', 3], ['trade-contract', 4], ['smugglers-cache', 2],
+  // card draw
+  ['recon-sweep', 3], ['tactical-strike', 3], ['supply-drop', 3], ['logistics', 3],
   // utility
   ['refit-dock', 3], ['repair', 3], ['field-repairs', 2],
   // reactions

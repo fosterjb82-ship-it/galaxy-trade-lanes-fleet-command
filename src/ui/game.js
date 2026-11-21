@@ -38,7 +38,7 @@ const board0Animate = () => {
 const TYPE_WORD = { ship: 'Ship', command: 'Command', credit: 'Credit', upgrade: 'Upgrade', reaction: 'Reaction', utility: 'Utility' };
 // Sound cues for actions whose effects don't already make a sound.
 const ACTION_SOUND = {
-  buy: 'buy', playCredit: 'income', playUpgrade: 'card', scrap: 'card', repair: 'card', react: 'card',
+  buy: 'buy', playCredit: 'income', playDraw: 'card', playUpgrade: 'card', scrap: 'card', repair: 'card', react: 'card',
   move: 'card', attack: 'card', deploy: 'card', establishRoute: 'income', chooseMissions: 'card', breakAgreement: 'income',
 };
 // Battle close-ups: 'always', 'kills' (only when a ship is destroyed) or 'off'.
@@ -256,7 +256,12 @@ export function mountGame(root) {
     }
     if (def.type === CARD_TYPE.CREDIT) {
       mode = { kind: 'idle' };
-      if (dispatch({ type: 'playCredit', player: state.active, card: uid })) say(`+${def.credits} credit.`);
+      if (dispatch({ type: 'playCredit', player: state.active, card: uid })) say(`+${def.credits} credit${def.credits === 1 ? '' : 's'}${def.draw ? ' and you draw a card' : ''}.`);
+      return;
+    }
+    if (def.type === CARD_TYPE.UTILITY && def.draw) {
+      mode = { kind: 'idle' };
+      if (dispatch({ type: 'playDraw', player: state.active, card: uid })) say(`${def.name}: you draw ${def.draw} card${def.draw === 1 ? '' : 's'}.`);
       return;
     }
     if (def.type === CARD_TYPE.SHIP) {

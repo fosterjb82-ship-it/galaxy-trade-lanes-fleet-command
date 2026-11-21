@@ -42,7 +42,7 @@ export const AGREEMENT_VP = 1;
 
 /** Chance the game ends after each round (DESIGN.md "Uncertain ending"). */
 export const END_CHANCE = {
-  standard: { 7: 1 / 3, 8: 1 / 2, 9: 1 / 2, 10: 1 },
+  standard: { 10: 1 / 3, 11: 1 / 2, 12: 1 }, // at least 10 rounds, at most 12
   quick: { 3: 1 / 2, 4: 1 }, // for trying the ending without a full game
 };
 export const END_ODDS_LABEL = { [1 / 3]: '1 in 3', [1 / 2]: '1 in 2', 1: 'certain' };
@@ -680,6 +680,14 @@ function requireTurn(state, player) {
   if (player !== state.active) throw new GameError(`It is ${state.players[state.active].name}'s turn.`);
 }
 
+/** Cards with "draw" (Recon Sweep, Supply Drop, Logistics…) draw when played. */
+function cardDraw(state, player, def) {
+  if (!def?.draw) return 0;
+  const n = drawCards(state, player, def.draw);
+  if (n) fx(state, { kind: 'draw', player, count: n });
+  return n;
+}
+
 function takeFromHand(state, player, card, type) {
   const p = state.players[player];
   if (!p.hand.includes(card)) throw new GameError('That card is not in your hand.');
@@ -924,6 +932,18 @@ const HANDLERS = {
     log(state, `${p.name} deployed a ${SHIPS[def.ship].name.toLowerCase()} at ${state.map.nodes[tile].name ?? 'open space'}.`);
   },
 
+  /** A utility card that draws cards (Logistics). */
+  playDraw(state, { player, card }) {
+    requireTurn(state, player);
+    const p = state.players[player];
+    const pre = state.cards[card] && cardDef(state.cards[card]);
+    if (!pre?.draw || pre.type !== CARD_TYPE.UTILITY) throw new GameError('That card does not draw cards.');
+    takeFromHand(state, player, card, CARD_TYPE.UTILITY);
+    p.played.push(card);
+    const n = cardDraw(state, player, pre);
+    log(state, `${p.name} played ${pre.name} and drew ${n} card${n === 1 ? '' : 's'}.`);
+  },
+
   /** Play every Credit card in hand that needs no choice. */
   playAllCredits(state, { player }) {
     requireTurn(state, player);
@@ -934,6 +954,7 @@ const HANDLERS = {
       p.hand.splice(p.hand.indexOf(c), 1);
       p.played.push(c);
       p.credits += cardDef(state.cards[c]).credits;
+      cardDraw(state, player, cardDef(state.cards[c])); // Supply Drop
     }
   },
 
@@ -958,6 +979,7 @@ const HANDLERS = {
     const def = takeFromHand(state, player, card, CARD_TYPE.CREDIT);
     p.played.push(card);
     p.credits += def.credits;
+    cardDraw(state, player, def);
     if (def.discard && discard && p.hand.includes(discard)) {
       p.hand.splice(p.hand.indexOf(discard), 1);
       p.discard.push(discard);
@@ -1056,6 +1078,7 @@ const HANDLERS = {
     if (!route) throw new GameError(`That tile is out of range (speed ${shipStats(state, ship).speed + bonus}).`);
     p.hand.splice(p.hand.indexOf(card), 1);
     p.played.push(card);
+    cardDraw(state, player, cardDef(cardObj));
     const nodes = state.map.nodes;
     state.lastMove = { ship: shipId, path: route.path, events: [] };
     fx(state, { kind: 'move', ship: shipId, path: route.path, nebulas: route.path.map((t, i) => (i > 0 && nodes[t].type === 'nebula' ? i : -1)).filter((i) => i > 0) });
@@ -1097,6 +1120,7 @@ const HANDLERS = {
           p.hand.splice(p.hand.indexOf(c), 1);
           p.played.push(c);
           p.credits += cardDef(state.cards[c]).credits;
+          cardDraw(state, player, cardDef(state.cards[c]));
         }
       }
     }
@@ -1138,6 +1162,7 @@ const HANDLERS = {
     if (!opt) throw new GameError('That target is out of range.');
     p.hand.splice(p.hand.indexOf(card), 1);
     p.played.push(card);
+    cardDraw(state, player, cardDef(state.cards[card]));
     ship.firedTurn = state.turnNumber;
     const atk = { attacker: shipId, target: targetId, weapon, bonus: cardDef(state.cards[card]).bonus ?? 0 };
     log(state, `${p.name}'s ${shipDef(ship).name.toLowerCase()} attacks ${shipLabel(state, target)}.`);

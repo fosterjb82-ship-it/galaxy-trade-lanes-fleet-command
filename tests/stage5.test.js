@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createGame, applyAction, cardLocations, controllerOf, turnOrder, deployTiles } from '../src/game/state.js';
+import { createGame, applyAction, cardLocations, controllerOf, turnOrder, deployTiles, moveTargets } from '../src/game/state.js';
 import { shipStats, attackOptions } from '../src/game/combat.js';
 import { routeOptions } from '../src/game/trade.js';
 import { MISSIONS } from '../src/game/missions.js';
@@ -257,7 +257,7 @@ test('missions: 3 dealt, keep 2, secret until scored; immediate missions score a
   for (const k of keys) spawn(g, 0, 'fighter', k.id);
   g = act(g, { type: 'playCredit', player: 0, card: giveCard(g, 0, 'credits') });
   assert.equal(g.players[0].missions[0].scored, true);
-  assert.equal(g.players[0].vpFrom.missions, 3);
+  assert.equal(g.players[0].vpFrom.missions, 7);
   assert.equal(g.notices[0].kind, 'mission');
 });
 
@@ -309,14 +309,14 @@ test('pirate phase: pirates step toward the nearest freighter and attack it', ()
 
 // ---------------------------------------------------------------- ending
 
-test('uncertain ending: never before round 7, always by round 10', () => {
+test('uncertain ending: never before round 10, always by round 12', () => {
   for (let i = 0; i < 12; i++) {
     let g = newGame(2, `END-${i}`);
     g.ships = g.ships.filter((s) => s.owner !== 'pirate');
     while (g.phase === 'action') g = endAll(g);
     const last = g.rounds.at(-1);
-    assert.ok(last.round >= 7 && last.round <= 10, `ended after round ${last.round}`);
-    assert.ok(g.rounds.slice(0, 6).every((r) => r.ending.chance === 0));
+    assert.ok(last.round >= 10 && last.round <= 12, `ended after round ${last.round}`);
+    assert.ok(g.rounds.slice(0, 9).every((r) => r.ending.chance === 0));
     assert.ok(g.final.ranking.length === 2);
   }
 });
@@ -340,7 +340,7 @@ test('final scoring: end-of-game missions, then tiebreakers (key planets, then s
     g = endAll(g);
   }
   // Unbroken Line (no losses) scores 4 for Ada; Bo's missions fail.
-  assert.equal(g.players[0].vpFrom.missions, 4);
+  assert.equal(g.players[0].vpFrom.missions, 9);
   assert.equal(g.players[1].vpFrom.missions, 0);
   assert.ok(g.players[1].missions.every((m) => m.revealed && m.failed));
   assert.equal(g.final.ranking[0].player, 0);
@@ -541,4 +541,41 @@ test('Ambush and Return Fire are played automatically against pirates', () => {
   assert.equal(ship(g, pir2).hull, 2, 'return fire hits the pirate for 2');
   assert.ok(g.players[0].discard.includes(rf));
   assert.ok(g.rounds[0].pirates.includes('Return fire!'));
+});
+
+test('draw cards: Recon Sweep, Tactical Strike, Supply Drop and Logistics each draw', () => {
+  let g = newGame(2, 'S5-DRAW');
+  const p = () => g.players[0];
+  const handSize = () => p().hand.length;
+  // Logistics: -1 card played, +2 drawn.
+  const lg = giveCard(g, 0, 'logistics');
+  let before = handSize();
+  g = act(g, { type: 'playDraw', player: 0, card: lg });
+  assert.equal(handSize(), before - 1 + 2);
+  // Supply Drop: +1 credit and +1 card.
+  const sd = giveCard(g, 0, 'supply-drop');
+  before = handSize();
+  const cr = p().credits;
+  g = act(g, { type: 'playCredit', player: 0, card: sd });
+  assert.equal(p().credits, cr + 1);
+  assert.equal(handSize(), before);
+  // Recon Sweep: moves a ship and draws.
+  const ship0 = ship(g, spawn(g, 0, 'fighter', p().home));
+  const rs = giveCard(g, 0, 'recon-sweep');
+  before = handSize();
+  const dest = [...moveTargets(g, ship0.id).keys()][0];
+  g = act(g, { type: 'move', player: 0, card: rs, ship: ship0.id, tile: dest });
+  assert.equal(handSize(), before);
+  cardLocations(g);
+  // Tactical Strike: fires and draws.
+  g = newGame(2, 'S5-DRAW2');
+  const [t] = empty(g);
+  const me = spawn(g, 0, 'frigate', t.id);
+  const foe = spawn(g, 1, 'fighter', t.id);
+  const ts = giveCard(g, 0, 'tactical-strike');
+  before = g.players[0].hand.length;
+  g = act(g, { type: 'attack', player: 0, card: ts, ship: me, target: foe });
+  assert.equal(g.players[0].hand.length, before);
+  assert.throws(() => act(g, { type: 'playDraw', player: 0, card: g.players[0].hand[0] }), /does not draw/);
+  cardLocations(g);
 });

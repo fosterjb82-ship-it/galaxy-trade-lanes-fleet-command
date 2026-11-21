@@ -27,7 +27,7 @@ export function mountSetup(root) {
   const labLink = h('a.button', { target: '_self' }, 'Preview map in Map Lab');
   const lengthRow = h('div.length-row');
   const LENGTHS = [
-    ['standard', 'Standard', '7–10 rounds; the end is uncertain from round 7'],
+    ['standard', 'Standard', '10–12 rounds; the end is uncertain from round 10'],
     ['quick', 'Quick test', '3–4 rounds, to try the ending'],
   ];
 

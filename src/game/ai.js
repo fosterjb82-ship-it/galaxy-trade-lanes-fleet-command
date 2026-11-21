@@ -147,7 +147,7 @@ function bestRoute(state, ship) {
 export function nextAction(state, pid) {
   const p = state.players[pid];
   if (p.missionOffer.length) return { type: 'chooseMissions', player: pid, keep: chooseMissions(p) };
-  const steps = [deployStep, upgradeStep, repairStep, attackStep, routeStep, moveStep, attackStep, routeStep, buyStep, offerStep];
+  const steps = [drawStep, deployStep, upgradeStep, repairStep, attackStep, routeStep, moveStep, attackStep, routeStep, buyStep, offerStep];
   for (const step of steps) {
     const a = step(state, pid);
     if (a && legal(state, a)) return a;
@@ -159,6 +159,16 @@ export function nextAction(state, pid) {
 export function chooseMissions(p) {
   // Keep the two worth the most.
   return [...p.missionOffer].sort((a, b) => MISSIONS[b].vp - MISSIONS[a].vp).slice(0, 2);
+}
+
+/** Play card-draw utilities (and Supply Drop) first: more options this turn. */
+function drawStep(state, pid) {
+  const p = state.players[pid];
+  const card = p.hand.find((u) => def(state, u).draw && [CARD_TYPE.UTILITY, CARD_TYPE.CREDIT].includes(def(state, u).type));
+  if (!card) return null;
+  return def(state, card).type === CARD_TYPE.UTILITY
+    ? { type: 'playDraw', player: pid, card }
+    : { type: 'playCredit', player: pid, card };
 }
 
 function deployStep(state, pid) {
@@ -223,6 +233,7 @@ function attackStep(state, pid) {
         }
         if (partner && !(o.preview.damage >= t.hull)) s -= 8; // don't sour a deal for a scratch
         if (bonus && !(o.preview.damage >= t.hull)) s -= 1; // save Focused Strike for a kill
+        if (def(state, card).draw) s += 0.3;
         if (s > 1 && (!best || s > best.s)) best = { s, action: { type: 'attack', player: pid, card, ship: ship.id, target: t.id, weapon: o.weapon } };
       }
     }
@@ -256,7 +267,7 @@ function moveStep(state, pid) {
       // Getting trade running matters most: traders without a route move first.
       const weight = isTrader(ship) && !state.routes.some((r) => r.ship === ship.id) ? 3 : 1;
       for (const [tile, r] of moveTargets(state, ship.id, bonus)) {
-        const gain = (placeValue(state, ship, tile, objs) - here) * weight - r.nebulas * 2 - (bonus ? 0.4 : 0);
+        const gain = (placeValue(state, ship, tile, objs) - here) * weight - r.nebulas * 2 - (bonus ? 0.4 : 0) + (def(state, card).draw ? 0.3 : 0);
         if (gain > 0.5 && (!best || gain > best.gain)) best = { gain, action: { type: 'move', player: pid, card, ship: ship.id, tile } };
       }
     }
@@ -294,8 +305,9 @@ function want(state, pid, defId) {
     if (defId === 'cargo-pod') return fits.some((s) => state.routes.some((r) => r.ship === s.id)) ? 5 : 2;
     return c.upgradeKind === 'Weapon' ? 5 : 4;
   }
-  if (c.command === 'attack') return 4;
-  if (c.command === 'move') return 3;
+  if (c.command === 'attack') return c.draw ? 4.5 : 4;
+  if (c.command === 'move') return c.draw ? 4 : 3;
+  if (c.draw) return c.type === CARD_TYPE.CREDIT ? 5 : 4;
   if (c.type === CARD_TYPE.REACTION) return defId === 'point-defense' ? 1.5 : 3;
   if (c.repair) return ships.some((s) => SHIPS[s.type].hull - s.hull >= 2) ? 4 : 1.5;
   return 1;
